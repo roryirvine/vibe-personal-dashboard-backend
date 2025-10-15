@@ -146,10 +146,8 @@ git commit -m "Update .gitignore for Go project artifacts"
 
 **Code**:
 ```go
-// Package models defines core data structures for the metrics service.
 package models
 
-// ParamType represents the data type of a query parameter.
 type ParamType string
 
 const (
@@ -158,7 +156,6 @@ const (
 	ParamTypeFloat  ParamType = "float"
 )
 
-// IsValid returns true if the ParamType is one of the supported types.
 func (pt ParamType) IsValid() bool {
 	switch pt {
 	case ParamTypeString, ParamTypeInt, ParamTypeFloat:
@@ -234,14 +231,12 @@ git commit -m "Add ParamType enum with validation"
 ```go
 package models
 
-// ParamDefinition defines a parameter that can be passed to a metric query.
 type ParamDefinition struct {
 	Name     string    `toml:"name"`
 	Type     ParamType `toml:"type"`
 	Required bool      `toml:"required"`
 }
 
-// Validate checks if the parameter definition is valid.
 func (pd ParamDefinition) Validate() error {
 	if pd.Name == "" {
 		return ErrParamNameEmpty
@@ -266,8 +261,6 @@ var (
 	ErrInvalidParamType  = errors.New("parameter type must be string, int, or float")
 )
 
-// ParamDefinition defines a parameter that can be passed to a metric query.
-// ... rest of code
 ```
 
 **File to create**: `internal/models/param_definition_test.go`
@@ -358,7 +351,6 @@ git commit -m "Add ParamDefinition with validation"
 ```go
 package models
 
-// Metric represents a single metric configuration.
 type Metric struct {
 	Name     string            `toml:"name"`
 	Query    string            `toml:"query"`
@@ -366,7 +358,6 @@ type Metric struct {
 	Params   []ParamDefinition `toml:"params"`
 }
 
-// Validate checks if the metric definition is valid.
 func (m Metric) Validate() error {
 	if m.Name == "" {
 		return ErrMetricNameEmpty
@@ -385,7 +376,6 @@ func (m Metric) Validate() error {
 	return nil
 }
 
-// GetParamByName finds a parameter definition by name.
 func (m Metric) GetParamByName(name string) (ParamDefinition, bool) {
 	for _, param := range m.Params {
 		if param.Name == name {
@@ -531,7 +521,6 @@ git commit -m "Add Metric struct with validation and param lookup"
 ```go
 package models
 
-// MetricResult represents the result of a metric query for API responses.
 type MetricResult struct {
 	Name  string      `json:"name"`
 	Value interface{} `json:"value"`
@@ -712,7 +701,6 @@ You'll see errors like `undefined: LoadConfig`. **This is expected in TDD!**
 
 **Code**:
 ```go
-// Package config handles loading and validation of metric configurations from TOML files.
 package config
 
 import (
@@ -722,12 +710,10 @@ import (
 	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
-// Config represents the structure of the metrics.toml file.
 type Config struct {
 	Metrics []models.Metric `toml:"metrics"`
 }
 
-// LoadConfig loads and validates a metrics configuration file.
 func LoadConfig(path string) ([]models.Metric, error) {
 	var config Config
 
@@ -792,13 +778,10 @@ git commit -m "Add config loading with TOML parsing and validation"
 
 **Code**:
 ```go
-// Package repository defines the data access layer interface and implementations.
 package repository
 
 import "context"
 
-// Repository defines the interface for querying metrics data.
-// This abstraction allows us to swap database implementations without changing business logic.
 type Repository interface {
 	// QuerySingleValue executes a query and returns the first column of the first row.
 	// Returns an error if the query fails or returns no rows.
@@ -1053,13 +1036,10 @@ import (
 	_ "modernc.org/sqlite" // Import SQLite driver
 )
 
-// SQLiteRepository implements Repository using SQLite.
 type SQLiteRepository struct {
 	db *sql.DB
 }
 
-// NewSQLiteRepository creates a new SQLite repository.
-// The path parameter can be a file path or ":memory:" for in-memory database.
 func NewSQLiteRepository(path string) (Repository, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -1079,7 +1059,6 @@ func NewSQLiteRepository(path string) (Repository, error) {
 	return &SQLiteRepository{db: db}, nil
 }
 
-// QuerySingleValue executes a query and returns the first column of the first row.
 func (r *SQLiteRepository) QuerySingleValue(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
 	row := r.db.QueryRowContext(ctx, query, args...)
 
@@ -1094,7 +1073,6 @@ func (r *SQLiteRepository) QuerySingleValue(ctx context.Context, query string, a
 	return result, nil
 }
 
-// QueryMultiRow executes a query and returns all rows as a slice of maps.
 func (r *SQLiteRepository) QueryMultiRow(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -1139,7 +1117,6 @@ func (r *SQLiteRepository) QueryMultiRow(ctx context.Context, query string, args
 	return results, nil
 }
 
-// Close closes the database connection.
 func (r *SQLiteRepository) Close() error {
 	return r.db.Close()
 }
@@ -1271,7 +1248,6 @@ go test ./internal/service/
 
 **Code**:
 ```go
-// Package service implements business logic for the metrics API.
 package service
 
 import (
@@ -1281,7 +1257,6 @@ import (
 	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
-// convertParamValue converts a string parameter value to the appropriate Go type.
 func convertParamValue(value string, paramType models.ParamType) (interface{}, error) {
 	switch paramType {
 	case models.ParamTypeString:
@@ -1338,7 +1313,6 @@ import (
 	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
-// mockRepository is a mock implementation for testing
 type mockRepository struct {
 	singleValueFunc func(ctx context.Context, query string, args ...interface{}) (interface{}, error)
 	multiRowFunc    func(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error)
@@ -1567,14 +1541,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// MetricService handles business logic for fetching metrics.
 type MetricService struct {
 	repo    repository.Repository
 	metrics map[string]models.Metric
 	logger  *slog.Logger
 }
 
-// NewMetricService creates a new metric service.
 func NewMetricService(repo repository.Repository, metrics []models.Metric, logger *slog.Logger) *MetricService {
 	// Build a map for fast metric lookup
 	metricMap := make(map[string]models.Metric)
@@ -1589,7 +1561,6 @@ func NewMetricService(repo repository.Repository, metrics []models.Metric, logge
 	}
 }
 
-// GetMetricNames returns a list of all available metric names.
 func (s *MetricService) GetMetricNames() []string {
 	names := make([]string, 0, len(s.metrics))
 	for name := range s.metrics {
@@ -1598,7 +1569,6 @@ func (s *MetricService) GetMetricNames() []string {
 	return names
 }
 
-// GetMetric fetches a single metric by name with optional parameters.
 func (s *MetricService) GetMetric(ctx context.Context, name string, params map[string]string) (models.MetricResult, error) {
 	// Find metric definition
 	metric, exists := s.metrics[name]
@@ -1630,7 +1600,6 @@ func (s *MetricService) GetMetric(ctx context.Context, name string, params map[s
 	}, nil
 }
 
-// GetMetrics fetches multiple metrics concurrently.
 func (s *MetricService) GetMetrics(ctx context.Context, names []string, params map[string]string) ([]models.MetricResult, error) {
 	results := make([]models.MetricResult, len(names))
 	g, ctx := errgroup.WithContext(ctx)
@@ -1654,7 +1623,6 @@ func (s *MetricService) GetMetrics(ctx context.Context, names []string, params m
 	return results, nil
 }
 
-// prepareParams validates parameters and converts them to the correct types.
 func (s *MetricService) prepareParams(metric models.Metric, params map[string]string) ([]interface{}, error) {
 	if len(metric.Params) == 0 {
 		return nil, nil
@@ -1807,7 +1775,6 @@ import (
 	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
-// Mock service for testing
 type mockMetricService struct {
 	getNamesFunc  func() []string
 	getMetricFunc func(ctx context.Context, name string, params map[string]string) (models.MetricResult, error)
@@ -1902,14 +1869,12 @@ func TestGetSingleMetric(t *testing.T) {
 	}
 }
 
-// Add more tests for GetMultipleMetrics, error cases, etc.
 ```
 
 **File to create**: `internal/api/handlers/metrics.go`
 
 **Code**:
 ```go
-// Package handlers implements HTTP request handlers for the metrics API.
 package handlers
 
 import (
@@ -1924,20 +1889,17 @@ import (
 	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
-// MetricService defines the interface for the metric service.
 type MetricService interface {
 	GetMetricNames() []string
 	GetMetric(ctx context.Context, name string, params map[string]string) (models.MetricResult, error)
 	GetMetrics(ctx context.Context, names []string, params map[string]string) ([]models.MetricResult, error)
 }
 
-// MetricsHandler handles HTTP requests for metrics.
 type MetricsHandler struct {
 	service MetricService
 	logger  *slog.Logger
 }
 
-// NewMetricsHandler creates a new metrics handler.
 func NewMetricsHandler(service MetricService, logger *slog.Logger) *MetricsHandler {
 	return &MetricsHandler{
 		service: service,
@@ -1945,13 +1907,11 @@ func NewMetricsHandler(service MetricService, logger *slog.Logger) *MetricsHandl
 	}
 }
 
-// ListMetrics returns a list of all available metric names.
 func (h *MetricsHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 	names := h.service.GetMetricNames()
 	h.respondJSON(w, http.StatusOK, names)
 }
 
-// GetSingleMetric fetches a single metric by name.
 func (h *MetricsHandler) GetSingleMetric(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	params := extractQueryParams(r)
@@ -1965,7 +1925,6 @@ func (h *MetricsHandler) GetSingleMetric(w http.ResponseWriter, r *http.Request)
 	h.respondJSON(w, http.StatusOK, []models.MetricResult{result})
 }
 
-// GetMultipleMetrics fetches multiple metrics.
 func (h *MetricsHandler) GetMultipleMetrics(w http.ResponseWriter, r *http.Request) {
 	// Parse comma-separated metric names from query param
 	namesParam := r.URL.Query().Get("names")
@@ -1991,7 +1950,6 @@ func (h *MetricsHandler) GetMultipleMetrics(w http.ResponseWriter, r *http.Reque
 	h.respondJSON(w, http.StatusOK, results)
 }
 
-// extractQueryParams extracts all query parameters into a map.
 func extractQueryParams(r *http.Request) map[string]string {
 	params := make(map[string]string)
 	for key, values := range r.URL.Query() {
@@ -2002,7 +1960,6 @@ func extractQueryParams(r *http.Request) map[string]string {
 	return params
 }
 
-// respondJSON writes a JSON response.
 func (h *MetricsHandler) respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -2013,7 +1970,6 @@ func (h *MetricsHandler) respondJSON(w http.ResponseWriter, status int, data int
 	}
 }
 
-// respondError writes a JSON error response.
 func (h *MetricsHandler) respondError(w http.ResponseWriter, status int, message string) {
 	h.respondJSON(w, status, map[string]string{"error": message})
 }
@@ -2038,7 +1994,6 @@ git commit -m "Implement HTTP handlers with tests"
 
 **Code**:
 ```go
-// Package api provides HTTP routing and middleware configuration.
 package api
 
 import (
@@ -2050,7 +2005,6 @@ import (
 	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
 )
 
-// NewRouter creates and configures the HTTP router.
 func NewRouter(metricsHandler *handlers.MetricsHandler, logger *slog.Logger) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -2075,7 +2029,6 @@ func NewRouter(metricsHandler *handlers.MetricsHandler, logger *slog.Logger) *ch
 	return r
 }
 
-// requestLogger logs HTTP requests.
 func requestLogger(logger *slog.Logger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2124,7 +2077,6 @@ git commit -m "Add router configuration with logging middleware"
 
 **Code**:
 ```go
-// Vibe personal dashboard backend - metrics API service
 package main
 
 import (

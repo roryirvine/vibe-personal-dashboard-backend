@@ -47,12 +47,17 @@ Only pause to ask for confirmation when:
 
  - NEVER add comments explaining that something is "improved", "better", "new", "enhanced", or referencing what it used to be
  - NEVER add instructional comments telling developers what to do ("copy this pattern", "use this instead")
- - Comments should explain WHAT the code does or WHY it exists, not how it's better than something else
+ - Comments should be used sparingly, ideally only for code that needs explanation or context
+  - NEVER add comments which state the obvious
+  - NEVER add comments which simply repeat what the code clearly shows
+  - DO comment complex algorithms or business logic
+  - DO document assumptions and any edge cases
+ - Comments should explain WHY the code exists, not how it's better than something else
  - If you're refactoring, remove old comments - don't add new ones explaining the refactoring
  - YOU MUST NEVER remove code comments unless you can PROVE they are actively false. Comments are important documentation and must be preserved.
  - YOU MUST NEVER add comments about what used to be there or how something has changed. 
  - YOU MUST NEVER refer to temporal context in comments (like "recently refactored" "moved") or code. Comments should be evergreen and describe the code as it is. If you name something "new" or "enhanced" or "improved", you've probably made a mistake and MUST STOP and ask me what to do.
- - All code files MUST start with a brief (2 or 3 lines) comment explaining what the file does.
+ - All code files MUST start with a brief (at most 3 lines) comment explaining what the file does.
 
 ## Version Control
 
@@ -112,11 +117,14 @@ Follow this debugging framework for ANY technical issue:
 
 ## Learning and Memory Management
 
-- YOU MUST use the journal tool frequently to capture technical insights, failed approaches, and user preferences
-- Before starting complex tasks, search the journal for relevant past experiences and lessons learned
-- Document architectural decisions and their outcomes for future reference
+- Keep a record of your work in a journal (use JOURNAL.md - if it doesn't already exist, create it first)
+- Always record in your journal every prompt you receive, along with a brief description of what you did and how you did it
+- Also capture technical insights, failed approaches, user preferences, and anything you find challenging or confusing
+- Document any new architectural decisions or changes and their outcomes for future reference
 - Track patterns in user feedback to improve collaboration over time
+- Before starting complex tasks, search the journal for relevant past experiences and lessons learned
 - When you notice something that should be fixed but is unrelated to your current task, document it in your journal rather than fixing it immediately
+- **IMPORTANT**: Do not forget to update the note at the end of each task!!!
 
 ## Project Overview
 
@@ -128,6 +136,7 @@ The project uses a devcontainer for consistent development environments:
 - Base image: `mcr.microsoft.com/devcontainers/go:2-trixie`
 - Includes Node.js support (for potential frontend tooling or scripts)
 - Includes modern shell utilities
+- Includes sqlite3
 
 ## Project Setup
 
