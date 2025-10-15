@@ -2,6 +2,8 @@
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
 # Binaries for programs and plugins
+/bin/
+/server
 *.exe
 *.exe~
 *.dll
@@ -17,6 +19,11 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
@@ -28,5 +35,8 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# OS
+.DS_Store
