@@ -21,8 +21,7 @@ profile.cov
 
 # Databases
 *.db
-*.sqlite
-*.sqlite3
+*.sqlite*
 
 # Dependency directories (remove the comment below to include it)
 # vendor/

@@ -1,3 +1,3 @@
 module github.com/roryirvine/vibe-personal-dashboard-backend
 
-go 1.24.6
+go 1.24

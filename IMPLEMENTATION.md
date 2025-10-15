@@ -47,7 +47,7 @@ You should see a file that starts with:
 ```
 module github.com/roryirvine/vibe-personal-dashboard-backend
 
-go 1.21
+go 1.2
 ```
 
 **Commit**:
