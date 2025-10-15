@@ -2009,7 +2009,7 @@ func extractQueryParams(r *http.Request) map[string]string {
 // respondJSON writes a JSON response.
 func (h *MetricsHandler) respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteStatus(status)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		if h.logger != nil {
 			h.logger.Error("failed to encode JSON response", "error", err)
