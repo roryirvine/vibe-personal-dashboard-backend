@@ -35,10 +35,8 @@ This guide walks you through implementing a metrics API service in Go from scrat
 **Commands to run**:
 ```bash
 cd /workspaces/vibe-personal-dashboard-backend
-go mod init github.com/yourusername/vibe-personal-dashboard-backend
+go mod init github.com/roryirvine/vibe-personal-dashboard-backend
 ```
-
-Replace `yourusername` with your actual GitHub username or use a placeholder like `vibe`.
 
 **How to verify**:
 ```bash
@@ -47,7 +45,7 @@ cat go.mod
 
 You should see a file that starts with:
 ```
-module github.com/yourusername/vibe-personal-dashboard-backend
+module github.com/roryirvine/vibe-personal-dashboard-backend
 
 go 1.21
 ```
@@ -215,7 +213,7 @@ go test ./internal/models/
 
 You should see:
 ```
-ok      github.com/yourusername/vibe-personal-dashboard-backend/internal/models
+ok      github.com/roryirvine/vibe-personal-dashboard-backend/internal/models
 ```
 
 **Commit**:
@@ -598,7 +596,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -721,7 +719,7 @@ import (
 	"fmt"
 
 	"github.com/BurntSushi/toml"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 // Config represents the structure of the metrics.toml file.
@@ -768,8 +766,6 @@ func validateMetrics(metrics []models.Metric) error {
 	return nil
 }
 ```
-
-**Update the test file** to use the correct import path (replace `yourusername`).
 
 **Run tests**:
 ```bash
@@ -1196,7 +1192,7 @@ package service
 import (
 	"testing"
 
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 func TestConvertParamValue(t *testing.T) {
@@ -1282,7 +1278,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 // convertParamValue converts a string parameter value to the appropriate Go type.
@@ -1339,7 +1335,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 // mockRepository is a mock implementation for testing
@@ -1566,8 +1562,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/repository"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/repository"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -1808,7 +1804,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 // Mock service for testing
@@ -1925,7 +1921,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/models"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
 )
 
 // MetricService defines the interface for the metric service.
@@ -2051,7 +2047,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/api/handlers"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
 )
 
 // NewRouter creates and configures the HTTP router.
@@ -2108,7 +2104,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/api/handlers"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
 )
 ```
 
@@ -2141,11 +2137,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/api"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/api/handlers"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/config"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/repository"
-	"github.com/yourusername/vibe-personal-dashboard-backend/internal/service"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/config"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/repository"
+	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/service"
 )
 
 func main() {
