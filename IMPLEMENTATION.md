@@ -146,6 +146,7 @@ git commit -m "Update .gitignore for Go project artifacts"
 
 **Code**:
 ```go
+// Defines parameter types supported in metric queries.
 package models
 
 type ParamType string
@@ -252,6 +253,7 @@ func (pd ParamDefinition) Validate() error {
 
 **Add these error definitions**:
 ```go
+// Defines parameter definitions for metric queries with validation.
 package models
 
 import "errors"
@@ -349,6 +351,7 @@ git commit -m "Add ParamDefinition with validation"
 
 **Code**:
 ```go
+// Defines metric configuration structure with query and parameter definitions.
 package models
 
 type Metric struct {
@@ -519,6 +522,7 @@ git commit -m "Add Metric struct with validation and param lookup"
 
 **Code**:
 ```go
+// Defines the API response structure for metric results.
 package models
 
 type MetricResult struct {
@@ -701,6 +705,7 @@ You'll see errors like `undefined: LoadConfig`. **This is expected in TDD!**
 
 **Code**:
 ```go
+// Loads and validates TOML metric configuration files.
 package config
 
 import (
@@ -778,6 +783,7 @@ git commit -m "Add config loading with TOML parsing and validation"
 
 **Code**:
 ```go
+// Defines the database repository interface for metric queries.
 package repository
 
 import "context"
@@ -1026,6 +1032,7 @@ go test ./internal/repository/
 
 **Code**:
 ```go
+// Implements the repository interface using SQLite.
 package repository
 
 import (
@@ -1040,6 +1047,8 @@ type SQLiteRepository struct {
 	db *sql.DB
 }
 
+// NewSQLiteRepository creates a new SQLite repository.
+// The path parameter can be a file path or ":memory:" for an in-memory database.
 func NewSQLiteRepository(path string) (Repository, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -1248,6 +1257,7 @@ go test ./internal/service/
 
 **Code**:
 ```go
+// Converts URL query parameters to typed values for database queries.
 package service
 
 import (
@@ -1529,6 +1539,7 @@ go test ./internal/service/
 
 **Code**:
 ```go
+// Executes metric queries with parameter validation and concurrent execution.
 package service
 
 import (
@@ -1875,6 +1886,7 @@ func TestGetSingleMetric(t *testing.T) {
 
 **Code**:
 ```go
+// HTTP handlers for metrics API endpoints.
 package handlers
 
 import (
@@ -1994,6 +2006,7 @@ git commit -m "Implement HTTP handlers with tests"
 
 **Code**:
 ```go
+// Configures HTTP routes and middleware for the metrics API.
 package api
 
 import (
@@ -2077,6 +2090,7 @@ git commit -m "Add router configuration with logging middleware"
 
 **Code**:
 ```go
+// Main entry point for the metrics API server.
 package main
 
 import (
