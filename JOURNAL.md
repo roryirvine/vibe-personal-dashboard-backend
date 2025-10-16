@@ -199,3 +199,110 @@ The only issue was missing package-level documentation, which is now resolved.
 ### Files Modified
 
 - IMPLEMENTATION.md: Added 12 package comments and 1 function comment
+
+---
+
+## 2025-10-16: Phase 2 Implementation - Models Package
+
+### Prompt
+
+Rory asked me to implement Phase 2 of the Vibe project (Models Package). We confirmed the approach: create a feature branch, commit after each task, and update the journal at the end.
+
+### What I Did
+
+Successfully implemented all of Phase 2 following TDD principles exactly as specified in IMPLEMENTATION.md:
+
+#### Task 2.1: ParamType Enum
+- Created `param_type.go` with custom type and constants for string, int, float
+- Implemented `IsValid()` method for type validation
+- Wrote comprehensive tests covering valid and invalid types
+- All tests passed
+- Commit: 99d7a3b "Add ParamType enum with validation"
+
+#### Task 2.2: ParamDefinition Struct
+- Created `param_definition.go` with error variables
+- Implemented struct with TOML tags (Name, Type, Required)
+- Implemented `Validate()` method checking for empty names and invalid types
+- Wrote tests covering all validation scenarios
+- All tests passed
+- Commit: 6280ee8 "Add ParamDefinition with validation"
+
+#### Task 2.3: Metric Struct
+- Created `metric.go` with error variables for name and query validation
+- Implemented Metric struct with Name, Query, MultiRow, and Params fields
+- Implemented `Validate()` method that also validates nested parameter definitions
+- Implemented `GetParamByName()` helper for parameter lookup
+- Wrote comprehensive tests for validation and parameter lookup (existing/non-existing params)
+- All tests passed
+- Commit: 931bf21 "Add Metric struct with validation and param lookup"
+
+#### Task 2.4: MetricResult Struct
+- Created `metric_result.go` with simple struct for API responses
+- Struct has Name (string) and Value (interface{}) fields with JSON tags
+- No tests needed (simple data structure with no logic)
+- Commit: a7173ed "Add MetricResult struct for API responses"
+
+#### Final Verification
+- Ran `go test ./internal/models/ -v`
+- All 14 test cases passed (5 param type tests, 4 param definition tests, 5 metric tests)
+- Test output confirms comprehensive coverage
+
+### Current Project State
+
+**Branch**: `feature/phase-2-models` (created from main)
+
+**Completed Files**:
+- ✅ `internal/models/param_type.go` (with package comment)
+- ✅ `internal/models/param_type_test.go`
+- ✅ `internal/models/param_definition.go` (with package comment)
+- ✅ `internal/models/param_definition_test.go`
+- ✅ `internal/models/metric.go` (with package comment)
+- ✅ `internal/models/metric_test.go`
+- ✅ `internal/models/metric_result.go` (with package comment)
+
+**Test Results**:
+- Total: 14 test cases
+- Passed: 14
+- Failed: 0
+- Coverage: All validation logic, edge cases, and helper methods
+
+**Commits**:
+1. 99d7a3b - Add ParamType enum with validation
+2. 6280ee8 - Add ParamDefinition with validation
+3. 931bf21 - Add Metric struct with validation and param lookup
+4. a7173ed - Add MetricResult struct for API responses
+
+### Technical Insights
+
+**TDD Process**:
+- Writing tests first forced clear thinking about requirements
+- Tests serve as documentation of expected behavior
+- Having failing tests first confirmed implementation correctness
+
+**Go Best Practices Applied**:
+- Custom types for enums (ParamType) provide type safety
+- Table-driven tests for comprehensive coverage
+- Error variables for consistent error handling
+- TOML and JSON struct tags for configuration and API marshaling
+- Package comments on all files as required by CLAUDE.md
+
+**Validation Pattern**:
+- Each struct has its own `Validate()` method
+- Metric validation delegates to ParamDefinition validation
+- Errors are descriptive and include context
+
+### Next Steps
+
+Phase 3 will implement the Config Package:
+- Task 3.1: Install TOML parser dependency
+- Task 3.2: Create Config struct and parser with TDD
+- Validation for duplicate metric names
+- TOML file parsing and error handling
+
+### Key Principles Followed
+
+✅ **TDD**: All tests written before implementation
+✅ **YAGNI**: Only implemented required functionality
+✅ **KISS**: Simple, straightforward implementations
+✅ **Commit Frequently**: One commit per task as specified
+✅ **Package Comments**: All files have required documentation
