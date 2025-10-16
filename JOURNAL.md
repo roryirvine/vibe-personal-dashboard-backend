@@ -433,12 +433,24 @@ Successfully implemented all of Phase 3 following TDD principles as specified in
   - All 4 test cases passed
   - Commit: 5b7c2f5 "Add config loading with TOML parsing and validation"
 
+#### Post-Implementation Fixes
+- **Fix 1: TOML dependency incorrectly marked as indirect**
+  - Issue: `go get` ran before importing, causing `// indirect` comment
+  - Fix: Ran `go mod tidy` to properly mark as direct dependency
+  - Commit: de5d7ca "Fix TOML dependency marked as direct (not indirect)"
+
+- **Fix 2: Missing test case for empty metrics array**
+  - Issue: `validateMetrics()` returns error for empty array but no test coverage
+  - Fix: Added 5th test case for valid TOML file with no metrics defined
+  - All 5 test cases now pass
+  - Commit: 253eeee "Add test case for empty metrics array in config"
+
 #### Final Verification
 - Ran `go test ./...` to verify all packages still work
 - Results:
-  - `internal/config`: 4 tests passed
+  - `internal/config`: 5 tests passed (added empty metrics test)
   - `internal/models`: 14 tests passed (cached from Phase 2)
-  - Total: 18 tests passing
+  - Total: 19 tests passing
 
 ### Current Project State
 
@@ -451,14 +463,17 @@ Successfully implemented all of Phase 3 following TDD principles as specified in
 - ✅ go.sum created with dependency checksums
 
 **Test Results**:
-- Config package: 4 test cases (all scenarios covered)
+- Config package: 5 test cases (all scenarios covered)
 - Models package: 14 test cases (from Phase 2)
-- Total passing: 18 tests
+- Total passing: 19 tests
 - Failed: 0
 
 **Commits**:
 1. c4844a0 - Add TOML parser dependency
 2. 5b7c2f5 - Add config loading with TOML parsing and validation
+3. ad2fed5 - Update journal with Phase 3 implementation summary
+4. de5d7ca - Fix TOML dependency marked as direct (not indirect)
+5. 253eeee - Add test case for empty metrics array in config
 
 ### Technical Insights
 
