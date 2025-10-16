@@ -392,3 +392,145 @@ Each layer adds exactly the context it knows about, building a clear error trail
 - IMPLEMENTATION.md:752 shows config layer wrapping pattern
 - Phase 2 code review confirmed implementation correctness
 - Follows KISS principle from CLAUDE.md
+
+---
+
+## 2025-10-16: Phase 3 Implementation - Config Package
+
+### Prompt
+
+Rory asked me to implement Phase 3 of the Vibe project (Config Package). We confirmed: create a new feature branch from main (Phase 2 already merged), use test fixtures for config files, no duplicate parameter name validation (YAGNI), and continue the sentinel error pattern.
+
+### What I Did
+
+Successfully implemented all of Phase 3 following TDD principles as specified in IMPLEMENTATION.md:
+
+#### Task 3.1: Install TOML Parser Dependency
+- Ran `go get github.com/BurntSushi/toml`
+- Verified dependency added to go.mod (version 1.5.0)
+- Commit: c4844a0 "Add TOML parser dependency"
+
+#### Task 3.2: Create Config Struct and Parser (TDD)
+- **Step 1: Wrote tests first** (TDD approach)
+  - Created `config_test.go` with four test cases:
+    1. Valid config with 2 metrics (one simple, one with params)
+    2. Nonexistent file error handling
+    3. Invalid TOML syntax error handling
+    4. Duplicate metric name detection
+  - Used `t.TempDir()` for isolated test fixtures
+  - Tests initially failed (as expected in TDD)
+
+- **Step 2: Implemented code to pass tests**
+  - Created `config.go` with:
+    - `Config` struct wrapping `[]models.Metric`
+    - `LoadConfig()` function using `toml.DecodeFile()`
+    - `validateMetrics()` helper for duplicate detection and metric validation
+  - Package comment: "Loads and validates TOML metric configuration files."
+  - Error wrapping adds metric name context: `fmt.Errorf("invalid metric %s: %w", metric.Name, err)`
+
+- **Step 3: Fixed and verified**
+  - Removed unused import from test file
+  - All 4 test cases passed
+  - Commit: 5b7c2f5 "Add config loading with TOML parsing and validation"
+
+#### Post-Implementation Fixes
+- **Fix 1: TOML dependency incorrectly marked as indirect**
+  - Issue: `go get` ran before importing, causing `// indirect` comment
+  - Fix: Ran `go mod tidy` to properly mark as direct dependency
+  - Commit: de5d7ca "Fix TOML dependency marked as direct (not indirect)"
+
+- **Fix 2: Missing test case for empty metrics array**
+  - Issue: `validateMetrics()` returns error for empty array but no test coverage
+  - Fix: Added 5th test case for valid TOML file with no metrics defined
+  - All 5 test cases now pass
+  - Commit: 253eeee "Add test case for empty metrics array in config"
+
+#### Final Verification
+- Ran `go test ./...` to verify all packages still work
+- Results:
+  - `internal/config`: 5 tests passed (added empty metrics test)
+  - `internal/models`: 14 tests passed (cached from Phase 2)
+  - Total: 19 tests passing
+
+### Current Project State
+
+**Branch**: `feature/phase-3-config` (created from main)
+
+**Completed Files**:
+- ✅ `internal/config/config.go` (with package comment)
+- ✅ `internal/config/config_test.go`
+- ✅ go.mod updated with TOML dependency
+- ✅ go.sum created with dependency checksums
+
+**Test Results**:
+- Config package: 5 test cases (all scenarios covered)
+- Models package: 14 test cases (from Phase 2)
+- Total passing: 19 tests
+- Failed: 0
+
+**Commits**:
+1. c4844a0 - Add TOML parser dependency
+2. 5b7c2f5 - Add config loading with TOML parsing and validation
+3. ad2fed5 - Update journal with Phase 3 implementation summary
+4. de5d7ca - Fix TOML dependency marked as direct (not indirect)
+5. 253eeee - Add test case for empty metrics array in config
+
+### Technical Insights
+
+**TDD Benefits Demonstrated**:
+- Writing tests first clarified exactly what LoadConfig() should do
+- Test fixtures using `t.TempDir()` provide clean isolation
+- Failing tests confirmed implementation was needed
+- Passing tests confirmed correctness
+
+**TOML Parsing Pattern**:
+- `toml.DecodeFile()` directly populates struct with TOML tags
+- Nested structures (metrics with params) work automatically
+- Parse errors are descriptive and include line numbers
+
+**Validation Strategy**:
+- Parse TOML first, validate structure second (separation of concerns)
+- Empty metrics array rejected early
+- Duplicate detection using map for O(n) performance
+- Each metric validated using its own `Validate()` method (delegation)
+
+**Error Context Layering** (continuing Phase 2 pattern):
+```
+Models:  ErrParamNameEmpty
+         ↓
+Config:  "invalid metric %s: %w" → "invalid metric test_metric: parameter name cannot be empty"
+```
+
+The config layer adds the metric name, which is exactly the context this layer knows about.
+
+**Test Fixture Strategy**:
+- Using temporary directories with `t.TempDir()` instead of actual config files
+- Each test creates its own isolated TOML file
+- Phase 8 will create the actual `config/metrics.toml` for running the service
+- This keeps tests fast, isolated, and not dependent on external files
+
+### Next Steps
+
+Phase 4 will implement the Repository Layer:
+- Task 4.1: Define Repository interface
+- Task 4.2: Install SQLite driver (modernc.org/sqlite)
+- Task 4.3: Implement SQLite repository with TDD
+  - `QuerySingleValue()` for single metrics
+  - `QueryMultiRow()` for multi-row metrics
+  - Connection pooling and context support
+  - Comprehensive tests with in-memory database
+
+### Key Principles Followed
+
+✅ **TDD**: Tests written before implementation, verified failures, then verified passes
+✅ **YAGNI**: No duplicate parameter validation, no hot-reload, no advanced features
+✅ **KISS**: Simple map-based duplicate detection, straightforward validation
+✅ **Commit Frequently**: Two commits for two distinct tasks
+✅ **Package Comments**: Required documentation included
+✅ **Error Pattern Consistency**: Continued sentinel errors with context wrapping
+
+### Reference
+
+- IMPLEMENTATION.md:546-773 (Phase 3: Config Package)
+- DESIGN.md:222-228 (TOML format rationale)
+- All tests passing: `go test ./...`
