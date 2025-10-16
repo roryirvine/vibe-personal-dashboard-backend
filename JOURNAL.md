@@ -306,3 +306,89 @@ Phase 3 will implement the Config Package:
 ✅ **KISS**: Simple, straightforward implementations
 ✅ **Commit Frequently**: One commit per task as specified
 ✅ **Package Comments**: All files have required documentation
+
+---
+
+## 2025-10-16: Phase 2 Review - Error Handling Pattern Decision
+
+### Prompt
+
+Rory reviewed the Phase 2 implementation and questioned whether we should use `errors.Is()` for error comparison instead of direct equality, and whether we should wrap errors with `fmt.Errorf` at the model layer to add context.
+
+### Analysis
+
+Examined the error handling pattern across all layers of the architecture:
+
+**Current Pattern:**
+- **Models layer**: Returns sentinel errors directly (e.g., `return ErrParamNameEmpty`)
+- **Config layer**: Wraps errors with context (e.g., `fmt.Errorf("invalid metric %s: %w", metric.Name, err)`)
+- **Service layer**: Adds parameter/query context when needed
+- **Handler layer**: Converts to HTTP errors with full context
+
+**Tests:**
+- Models: Use direct equality (`err != tt.wantErr`)
+- This is appropriate for sentinel error testing at the model layer
+
+### Decision
+
+**Kept the current implementation** - no changes needed.
+
+### Rationale
+
+1. **Clean Separation of Concerns**
+   - Model layer validates *structure* (is the data valid?)
+   - Config layer adds *identity* (which metric failed?)
+   - Service layer adds *operation* context (what query failed?)
+   - Handler layer provides *user-facing* errors
+
+2. **No Redundant Messages**
+   - Context is added exactly once at each layer where it's meaningful
+   - Final error: "invalid metric users_by_date: parameter name cannot be empty"
+   - Clear, actionable, not repetitive
+
+3. **Follows Go Best Practices**
+   - Matches stdlib pattern (e.g., `os.PathError` wraps base errors with file path)
+   - Sentinel errors at base layer, wrapped errors at higher layers
+   - Internal package doesn't need `errors.Is()` complexity
+
+4. **Keeps Tests Simple**
+   - Direct equality checks at model layer test exactly what they should
+   - No need for `errors.Is()` when testing sentinel errors directly
+   - Tests remain focused on their layer's concerns
+
+5. **Architecture-Appropriate**
+   - This is an **application** (not a library)
+   - Errors always flow through config layer before being seen
+   - Config layer is the natural place to add metric name context
+   - External callers don't consume model errors directly
+
+### When the Alternative Would Be Better
+
+Using `errors.Is()` and wrapping at every layer would be appropriate if:
+- Building a **public library** where model errors might be consumed directly
+- Need to check error types across package boundaries
+- Multiple error paths bypass the config layer
+- External code needs to unwrap to specific error types
+
+But for this internal application architecture, KISS wins.
+
+### Technical Insight
+
+**Error Context Layering Pattern:**
+```
+Models:  ErrParamNameEmpty
+         ↓
+Config:  "invalid metric %s: %w" → "invalid metric users_by_date: parameter name cannot be empty"
+         ↓
+Service: "invalid parameters: %w" → "invalid parameters: invalid metric users_by_date: parameter name cannot be empty"
+         ↓
+Handler: HTTP 500 with full error chain
+```
+
+Each layer adds exactly the context it knows about, building a clear error trail without redundancy.
+
+### Reference
+
+- IMPLEMENTATION.md:752 shows config layer wrapping pattern
+- Phase 2 code review confirmed implementation correctness
+- Follows KISS principle from CLAUDE.md
