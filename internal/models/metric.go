@@ -23,7 +23,6 @@ func (m Metric) Validate() error {
 		return ErrMetricQueryEmpty
 	}
 
-	// Validate all parameter definitions
 	for _, param := range m.Params {
 		if err := param.Validate(); err != nil {
 			return err
