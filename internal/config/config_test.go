@@ -103,4 +103,19 @@ query = "SELECT 2"
 			t.Error("expected error for duplicate metric names")
 		}
 	})
+
+	t.Run("empty metrics array", func(t *testing.T) {
+		content := `# Valid TOML but no metrics defined
+`
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "empty.toml")
+		if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test config: %v", err)
+		}
+
+		_, err := LoadConfig(configPath)
+		if err == nil {
+			t.Error("expected error for config with no metrics")
+		}
+	})
 }
