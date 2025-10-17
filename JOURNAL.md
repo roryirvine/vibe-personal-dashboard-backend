@@ -534,3 +534,135 @@ Phase 4 will implement the Repository Layer:
 - IMPLEMENTATION.md:546-773 (Phase 3: Config Package)
 - DESIGN.md:222-228 (TOML format rationale)
 - All tests passing: `go test ./...`
+
+---
+
+## 2025-10-17: IMPLEMENTATION.md Refactoring - Principles Over Prescriptions
+
+### Prompt
+
+Rory received feedback that IMPLEMENTATION.md was too focused on providing exact code examples rather than explaining the architectural reasoning behind decisions. He asked if I agreed, then requested I refactor Phase 3 only to test a different approach - focusing on helping implementers understand the task conceptually rather than providing templates to copy.
+
+### What I Did
+
+**Analysis**: I agreed with the feedback. The existing Phase 3 content (tasks 3.1-3.2) was:
+- Showing exact function signatures and code structures
+- Providing complete test files as templates
+- Prescribing specific implementations
+- Not explaining WHY architectural choices were made
+
+**Refactoring Approach**: Rewrote Phase 3 to shift from "here's the code" to "here's why we make these choices":
+
+#### Task 3.1: Install TOML Parser Dependency
+- **Before**: Just showed the command and expected output
+- **After**:
+  - Explained WHY we chose TOML (human-readable configuration)
+  - Explained WHY this specific library (most mature in Go ecosystem)
+  - Explained WHAT go.mod does (dependency management context)
+  - Still provided the command, but with understanding
+
+#### Task 3.2: Create Config Struct and Parser
+- **Before**: 150+ lines of exact test code and implementation code
+- **After**:
+  - **The problem we're solving**: Clear statement of what config loading needs to do
+  - **Why validation at load time**: Fail fast philosophy, operational benefits
+  - **Architecture decisions**: Explained 3 key decisions:
+    1. Single responsibility (what config package should/shouldn't do)
+    2. Validation layering (config-level vs model-level validation)
+    3. Error handling philosophy (wrapping for context)
+  - **Design approach**: Described WHAT to build without HOW:
+    - What test cases matter and WHY
+    - What components are needed (Config struct, LoadConfig func, validateMetrics helper)
+    - What Go patterns to use (error wrapping, fail fast)
+    - What success looks like
+  - **No code templates**: Removed all detailed implementation examples
+
+**Outcome**: Reduced Phase 3 from ~240 lines to ~90 lines, with much higher signal-to-noise ratio.
+
+### Technical Insights
+
+**Documentation Philosophy Shift**:
+- **Template-driven**: "Copy this exact code structure"
+  - Pros: Easy to follow mechanically
+  - Cons: Implementer doesn't understand choices, can't adapt, doesn't learn architecture
+
+- **Principle-driven**: "Here's what to build and why it matters"
+  - Pros: Implementer understands trade-offs, can make informed decisions, learns architecture
+  - Cons: Requires more thinking, slower initial implementation
+
+**Key Changes Made**:
+1. Lead with the "why" - what problem does this solve?
+2. Explain architectural reasoning - why these choices over alternatives?
+3. Describe components conceptually - what they should do, not exact syntax
+4. Focus on test cases as behavior specifications
+5. Provide design patterns, not code templates
+
+**What We Kept**:
+- Command-line instructions (these are objective facts)
+- Test strategy descriptions (these explain behavior)
+- Verification steps (these confirm correctness)
+- References to Go patterns (wrapping errors, fail fast)
+
+**What We Removed**:
+- Complete test file listings
+- Complete implementation file listings
+- Exact function signatures
+- Specific variable names and struct layouts
+
+### Example Transformation
+
+**Before**:
+```
+File to create: internal/config/config.go
+
+Code:
+[150 lines of exact Go code]
+```
+
+**After**:
+```
+You'll need:
+
+1. A Config struct: This is a wrapper around []models.Metric with TOML struct tags...
+
+2. A LoadConfig function:
+   - Takes a file path string
+   - Uses toml.DecodeFile() to parse
+   - Calls a validation function
+   - Returns []models.Metric and an error
+
+3. A validateMetrics helper:
+   - Checks at least one metric exists
+   - Uses map[string]bool to detect duplicates
+   - Returns descriptive errors
+```
+
+### Files Modified
+
+- IMPLEMENTATION.md: Refactored Phase 3 (lines 546-635)
+  - Task 3.1: Added "why" context for TOML choice
+  - Task 3.2: Complete rewrite to focus on architecture and reasoning
+  - Removed ~150 lines of code templates
+  - Added explanations of design decisions
+
+### Commit
+
+- 093533d "Refactor Phase 3 to explain why rather than show exact code"
+
+### Next Steps
+
+If this approach works well for Rory and future implementers, we should:
+1. Apply the same refactoring to other phases
+2. Focus on architectural reasoning throughout
+3. Trust implementers to make good implementation choices within the architectural constraints
+4. Keep the document as a guide, not a template
+
+### Key Principle
+
+**Teaching architecture over teaching syntax**: The implementer already knows Go. What they need to learn is:
+- Why this architecture?
+- What problems does each layer solve?
+- What are the trade-offs of these choices?
+- How do the pieces fit together conceptually?
+
+This refactoring embodies the CLAUDE.md principle: "We're colleagues working together" - treating the implementer as a capable engineer who needs context, not a junior who needs their hand held with exact code.
