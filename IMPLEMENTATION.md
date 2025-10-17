@@ -545,231 +545,92 @@ git commit -m "Add MetricResult struct for API responses"
 
 ## Phase 3: Config Package
 
+The config package is responsible for reading the metrics.toml file and transforming it into validated Go data structures that the rest of the application can use. This separation keeps file parsing concerns away from business logic.
+
 ### Task 3.1: Install TOML Parser Dependency
 
-**What you're doing**: Adding the TOML parsing library.
+**Why we need this**: The metrics.toml file uses TOML format because it's more human-readable than JSON for configuration files, especially when defining arrays of objects with parameters. The BurntSushi/toml library is the most mature and widely-used TOML parser in Go.
+
+**What you're achieving**: Adding a third-party dependency that can deserialize TOML text into Go structs.
 
 **Command**:
 ```bash
 go get github.com/BurntSushi/toml
 ```
 
-**How to verify**:
-```bash
-cat go.mod | grep toml
-```
+This updates `go.mod` and `go.sum` to track the dependency. The go.mod file is Go's way of managing dependencies - similar to package.json in Node or requirements.txt in Python.
 
-You should see:
-```
-github.com/BurntSushi/toml v1.x.x
-```
-
-**Commit**:
-```bash
-git add go.mod go.sum
-git commit -m "Add TOML parser dependency"
-```
+**Commit after verifying the dependency appears in go.mod**
 
 ---
 
 ### Task 3.2: Create Config Struct and Parser (TDD)
 
-**What you're doing**: Writing code to load and validate the metrics.toml file.
+**The problem we're solving**: We need to:
+1. Read an external TOML file from disk
+2. Parse it into our models.Metric structs (with all their nested ParamDefinitions)
+3. Validate that the configuration makes sense (no duplicate names, all required fields present)
+4. Return a usable slice of Metric objects
 
-**Step 1: Write the test first** (this is TDD!)
+**Why validation at load time**: We want to fail fast during application startup if the configuration is invalid, rather than discovering problems when a user makes an API request. This is better for operations - the server won't start with a bad config.
 
-**File to create**: `internal/config/config_test.go`
+**Architecture decisions**:
 
-**Code**:
-```go
-package config
+1. **Single responsibility**: The config package's only job is to load and validate the TOML file. It doesn't execute queries or handle HTTP requests.
 
-import (
-	"os"
-	"path/filepath"
-	"testing"
+2. **Validation layering**: We already have `Validate()` methods on our models (Metric, ParamDefinition). The config loader calls these, but also adds config-level validation like checking for duplicate metric names. This is different from model validation because it's checking relationships between metrics, not individual metric validity.
 
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
+3. **Error handling philosophy**: Use Go's error wrapping (`fmt.Errorf("context: %w", err)`) to preserve the underlying error while adding context. This makes debugging easier - you'll see both "failed to parse config file" and the specific TOML syntax error.
 
-func TestLoadConfig(t *testing.T) {
-	t.Run("valid config", func(t *testing.T) {
-		// Create a temporary config file
-		content := `
-[[metrics]]
-name = "test_metric"
-query = "SELECT COUNT(*) FROM users"
-multi_row = false
+**Design approach (following TDD)**:
 
-[[metrics]]
-name = "users_list"
-query = "SELECT id, name FROM users WHERE created > ?"
-multi_row = true
+**Step 1: Write tests that describe the behavior you need**
 
-[[metrics.params]]
-name = "start_date"
-type = "string"
-required = true
-`
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "metrics.toml")
-		if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
-			t.Fatalf("failed to write test config: %v", err)
-		}
+Think about what cases matter:
+- **Happy path**: A valid TOML file with multiple metrics, some with parameters
+- **File not found**: What happens if the path is wrong?
+- **Malformed TOML**: What if the file has syntax errors?
+- **Duplicate names**: What if two metrics have the same name? (This would break our API routing)
+- **Empty config**: Is a config file with no metrics valid? (Probably not - why run the server?)
 
-		// Load config
-		metrics, err := LoadConfig(configPath)
-		if err != nil {
-			t.Fatalf("LoadConfig() error = %v", err)
-		}
+Write test cases that verify each scenario. For the happy path, use `t.TempDir()` and `os.WriteFile()` to create an actual TOML file on disk during the test. This tests the real file I/O, not just mocked behavior.
 
-		// Verify we got 2 metrics
-		if len(metrics) != 2 {
-			t.Errorf("got %d metrics, want 2", len(metrics))
-		}
+**Step 2: Implement the minimum code to pass tests**
 
-		// Verify first metric
-		if metrics[0].Name != "test_metric" {
-			t.Errorf("first metric name = %s, want test_metric", metrics[0].Name)
-		}
-		if metrics[0].MultiRow {
-			t.Error("first metric should be single-row")
-		}
+You'll need:
 
-		// Verify second metric
-		if metrics[1].Name != "users_list" {
-			t.Errorf("second metric name = %s, want users_list", metrics[1].Name)
-		}
-		if !metrics[1].MultiRow {
-			t.Error("second metric should be multi-row")
-		}
-		if len(metrics[1].Params) != 1 {
-			t.Errorf("second metric has %d params, want 1", len(metrics[1].Params))
-		}
-	})
+1. **A Config struct**: This is a wrapper around `[]models.Metric` with TOML struct tags. The TOML library needs these tags to know how to map the TOML structure to Go fields.
 
-	t.Run("nonexistent file", func(t *testing.T) {
-		_, err := LoadConfig("/nonexistent/path.toml")
-		if err == nil {
-			t.Error("expected error for nonexistent file")
-		}
-	})
+   ```
+   [[metrics]]      <-- This TOML array syntax
+   name = "foo"
+   ```
 
-	t.Run("invalid toml", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "bad.toml")
-		if err := os.WriteFile(configPath, []byte("invalid { toml"), 0644); err != nil {
-			t.Fatalf("failed to write test config: %v", err)
-		}
+   needs to map to a Go field with tag `toml:"metrics"`
 
-		_, err := LoadConfig(configPath)
-		if err == nil {
-			t.Error("expected error for invalid TOML")
-		}
-	})
+2. **A LoadConfig function**:
+   - Takes a file path string
+   - Uses `toml.DecodeFile()` to parse the file into the Config struct
+   - Calls a validation function
+   - Returns `[]models.Metric` and an error
 
-	t.Run("duplicate metric names", func(t *testing.T) {
-		content := `
-[[metrics]]
-name = "duplicate"
-query = "SELECT 1"
+3. **A validateMetrics helper function**:
+   - Checks that at least one metric exists
+   - Uses a `map[string]bool` to detect duplicate names as it iterates
+   - Calls `Validate()` on each metric to ensure individual metrics are valid
+   - Returns descriptive errors
 
-[[metrics]]
-name = "duplicate"
-query = "SELECT 2"
-`
-		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "dup.toml")
-		if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
-			t.Fatalf("failed to write test config: %v", err)
-		}
+**Key Go patterns to use**:
+- Return errors, don't panic - let the caller (main.go) decide whether to exit
+- Use `fmt.Errorf()` with `%w` verb to wrap errors while preserving the original
+- Validate early and fail fast - do all validation in LoadConfig before returning
 
-		_, err := LoadConfig(configPath)
-		if err == nil {
-			t.Error("expected error for duplicate metric names")
-		}
-	})
-}
-```
+**Testing strategy**:
+Run tests first (they'll fail - that's expected in TDD). Then implement. Then run tests again until they pass. Don't write more code than needed to pass the tests.
 
-**Run the test** (it will fail because we haven't written the code yet):
-```bash
-go test ./internal/config/
-```
+**What success looks like**: When tests pass, you have a LoadConfig function that can read a TOML file, deserialize it into your domain models, validate the configuration, and return clean data or descriptive errors.
 
-You'll see errors like `undefined: LoadConfig`. **This is expected in TDD!**
-
-**Step 2: Write just enough code to make the test pass**
-
-**File to create**: `internal/config/config.go`
-
-**Code**:
-```go
-// Loads and validates TOML metric configuration files.
-package config
-
-import (
-	"fmt"
-
-	"github.com/BurntSushi/toml"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
-
-type Config struct {
-	Metrics []models.Metric `toml:"metrics"`
-}
-
-func LoadConfig(path string) ([]models.Metric, error) {
-	var config Config
-
-	// Parse TOML file
-	if _, err := toml.DecodeFile(path, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	// Validate all metrics
-	if err := validateMetrics(config.Metrics); err != nil {
-		return nil, err
-	}
-
-	return config.Metrics, nil
-}
-
-func validateMetrics(metrics []models.Metric) error {
-	if len(metrics) == 0 {
-		return fmt.Errorf("no metrics defined in config")
-	}
-
-	// Check for duplicate names
-	names := make(map[string]bool)
-	for _, metric := range metrics {
-		if names[metric.Name] {
-			return fmt.Errorf("duplicate metric name: %s", metric.Name)
-		}
-		names[metric.Name] = true
-
-		// Validate each metric
-		if err := metric.Validate(); err != nil {
-			return fmt.Errorf("invalid metric %s: %w", metric.Name, err)
-		}
-	}
-
-	return nil
-}
-```
-
-**Run tests**:
-```bash
-go test ./internal/config/
-```
-
-All tests should pass now!
-
-**Commit**:
-```bash
-git add internal/config/
-git commit -m "Add config loading with TOML parsing and validation"
-```
+**Commit**: Once tests pass and you've verified the implementation handles all test cases correctly.
 
 ---
 
