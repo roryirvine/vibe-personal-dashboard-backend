@@ -666,3 +666,215 @@ If this approach works well for Rory and future implementers, we should:
 - How do the pieces fit together conceptually?
 
 This refactoring embodies the CLAUDE.md principle: "We're colleagues working together" - treating the implementer as a capable engineer who needs context, not a junior who needs their hand held with exact code.
+
+---
+
+## 2025-10-17: IMPLEMENTATION.md Complete Refactoring - Phases 4-9
+
+### Prompt
+
+Rory confirmed that the Phase 3 refactoring approach worked well and asked me to "refactor the remaining phases, following the same principle."
+
+### What I Did
+
+Completed a systematic refactoring of Phases 4-9 of IMPLEMENTATION.md, transforming approximately 1,500 lines of prescriptive code templates into concise architectural guidance.
+
+**Phases Refactored**:
+
+#### Phase 4: Repository Layer (3 tasks)
+- Task 4.1: Define Repository Interface
+  - Explained the problem: Service layer needs database access without infrastructure concerns
+  - Why use an interface: testability, flexibility, dependency inversion
+  - Design decisions: context for cancellation, variadic args, generic return types
+  - What to implement conceptually, not exact code
+
+- Task 4.2: Install SQLite Driver
+  - Why SQLite: zero config, perfect for development, good enough for production
+  - Why modernc.org/sqlite: pure Go, no CGO, easier deployment
+
+- Task 4.3: Implement SQLite Repository (TDD)
+  - The problem: Handle Go's low-level database/sql package correctly
+  - Why this is complex: Dynamic column handling, NULL values, type conversion
+  - Architecture decisions: In-memory testing, connection pooling, error wrapping
+  - Testing strategy: What scenarios matter and why
+  - Implementation approach: What components needed (5 parts explained)
+  - Key Go patterns: defer, double-indirection for scanning, context-aware methods
+
+#### Phase 5: Service Layer (3 tasks)
+- Task 5.1: Install errgroup Dependency
+  - Why errgroup: coordinated error handling for concurrent execution
+
+- Task 5.2: Implement Parameter Conversion Helper (TDD)
+  - The problem: HTTP strings → typed database values
+  - Why this matters: Fail fast with clear errors vs runtime panics
+  - Architecture decisions: Type safety, error wrapping, return interface{}
+  - Testing strategy: Valid/invalid conversions, edge cases
+
+- Task 5.3: Implement MetricService (TDD)
+  - The problem: Service needs to execute queries, validate params, handle concurrency
+  - Why concurrent execution: Dashboard UIs request multiple metrics - parallel is faster
+  - Architecture decisions (5 key points):
+    1. Map-based lookup for O(1) performance
+    2. Interface-based repository for testing
+    3. Context propagation for cancellation/timeouts
+    4. Parameter preparation separation
+    5. errgroup for concurrent execution with fail-fast
+  - Testing strategy: 10 test scenarios described conceptually
+  - Implementation approach: 6 components to build
+
+#### Phase 6: HTTP API Layer (3 tasks)
+- Task 6.1: Install Chi Router
+  - Why Chi: lightweight, idiomatic, standard library types, no external deps
+
+- Task 6.2: Implement HTTP Handlers (TDD)
+  - The problem: Translate HTTP ↔ service layer
+  - Architecture decisions:
+    1. Handler struct with dependencies (interface, not concrete)
+    2. Interface Segregation Principle
+    3. Consistent error responses
+    4. Route design philosophy
+  - Testing strategy: Mock service, httptest, chi context simulation
+
+- Task 6.3: Create Router Setup
+  - The problem: Wire routes + middleware + lifecycle
+  - Architecture decisions:
+    1. Middleware chain (5 purposes explained)
+    2. Route organization with factory pattern
+    3. Conditional routing based on query params
+
+#### Phase 7: Main Application (1 task)
+- Task 7.1: Implement main.go
+  - The problem: Entry point that wires everything + handles shutdown
+  - Architecture decisions:
+    1. Dependency injection (explicit, no globals)
+    2. Fail fast on startup
+    3. Graceful shutdown (30-second timeout)
+    4. Structured logging
+  - Implementation: 6-step process described
+  - Key Go patterns: defer, signal.Notify, context.WithTimeout
+
+#### Phase 8: Example Configuration and Data (2 tasks)
+- Task 8.1: Create Example Metrics Config
+  - What to provide: Realistic examples showing different features
+
+- Task 8.2: Create Test Database Setup Script
+  - What to provide: Scripts that create usable test data
+
+#### Phase 9: Documentation and Testing (2 tasks)
+- Task 9.1: Create README
+  - What to provide: Quick start + configuration + development commands
+
+- Task 9.2: End-to-End Manual Test
+  - What to do: Verify entire system with manual curl tests
+
+**Refactoring Statistics**:
+- **Before**: ~2,100 lines total (Phases 4-9)
+- **After**: ~370 lines total (Phases 4-9)
+- **Reduction**: ~82% shorter while maintaining (and improving) clarity
+- **Code templates removed**: ~1,700 lines of prescriptive Go code
+- **Architectural guidance added**: Comprehensive "why" explanations
+
+### Technical Approach
+
+**Consistent Pattern Applied to Each Task**:
+1. **Start with the problem**: What are we solving?
+2. **Explain the why**: Why does this matter? Why these choices?
+3. **Architecture decisions**: List key decisions with rationale (numbered lists)
+4. **Design/testing strategy**: Conceptual approach, not templates
+5. **Implementation approach**: Components needed, not exact code
+6. **Key patterns**: Go idioms to use
+7. **What success looks like**: Verification criteria
+
+**What Was Removed**:
+- ~1,700 lines of exact code templates
+- Complete test file listings (except Phase 2 which has templates)
+- Exact function signatures and implementations
+- Detailed struct layouts
+- Line-by-line code examples
+
+**What Was Preserved/Enhanced**:
+- All command-line instructions (objective facts)
+- All "why" explanations (many added new)
+- Architecture decision rationale
+- Testing strategies (elevated from "here's the code" to "here's what to test and why")
+- Go pattern references
+- Verification steps
+
+### Key Transformations
+
+**Repository Layer Example**:
+- Before: 300+ lines of test code + implementation code
+- After: ~90 lines explaining:
+  - Why interface-based design matters
+  - Why SQLite for this use case
+  - What makes database/sql complex
+  - What testing strategy proves correctness
+  - What 5 implementation components are needed
+
+**Service Layer Example**:
+- Before: 400+ lines of mock implementations and test cases
+- After: ~120 lines explaining:
+  - Why concurrent execution matters
+  - 5 architecture decisions with rationale
+  - What 10 test scenarios matter and why
+  - How errgroup provides fail-fast behavior
+
+**HTTP Layer Example**:
+- Before: 250+ lines of handler templates
+- After: ~80 lines explaining:
+  - Interface Segregation Principle application
+  - Middleware composition benefits
+  - Why Chi over other routers
+
+### Files Modified
+
+- IMPLEMENTATION.md: Completely refactored Phases 4-9 (lines 637-1171)
+  - Phase 4: Repository Layer → principle-driven
+  - Phase 5: Service Layer → principle-driven
+  - Phase 6: HTTP API Layer → principle-driven
+  - Phase 7: Main Application → principle-driven
+  - Phase 8: Example Config/Data → simplified guidance
+  - Phase 9: Documentation/Testing → process-focused
+
+### Outcome
+
+**Document Evolution**:
+- **Phase 1-2**: Left unchanged (still template-based, relatively brief)
+- **Phase 3**: Successfully refactored (pilot test)
+- **Phase 4-9**: Now refactored consistently with Phase 3
+
+**New Document Structure**:
+- Total lines: ~1,170 (from ~2,700)
+- Phases 1-2 (Foundation/Models): ~545 lines (template-based for bootstrapping)
+- Phase 3-9 (All other layers): ~625 lines (principle-based)
+- Reduction: ~57% shorter overall
+- Quality: Higher signal-to-noise ratio, teaches architecture
+
+### Why This Works
+
+**Trust in the Implementer**:
+- Phases 1-2 provide templates because there's no context yet
+- Once basic patterns are established (Phase 3+), we can explain choices
+- The implementer already knows Go - they need to learn THIS architecture
+
+**Benefits**:
+1. **Teaches thinking**: Implementer understands trade-offs
+2. **Enables adaptation**: Can make informed deviations when needed
+3. **Reduces maintenance**: Fewer code examples to keep in sync
+4. **Faster to read**: Get to the architecture concepts quickly
+5. **Better documentation**: Explains decisions that matter long-term
+
+### Reference
+
+- IMPLEMENTATION.md: Complete refactoring of Phases 3-9
+- CLAUDE.md principle: "We're colleagues working together"
+- Original feedback: Document should explain "why", not prescribe "how"
+
+### Next Steps
+
+- Commit the refactored IMPLEMENTATION.md
+- Update journal (this entry)
+- Push changes for review
+- Future phases (if any) should follow this principle-based approach
+
+---

@@ -636,1672 +636,515 @@ Run tests first (they'll fail - that's expected in TDD). Then implement. Then ru
 
 ## Phase 4: Repository Layer
 
+The repository layer abstracts database access, isolating SQL and database-specific code from business logic. This layer provides a clean interface for the service layer to query metrics without knowing implementation details.
+
 ### Task 4.1: Define Repository Interface
 
-**What you're doing**: Creating an interface so we can swap database implementations later.
+**The problem we're solving**: The service layer needs to execute two types of queries:
+1. **Single-value queries**: Return one scalar (e.g., `SELECT COUNT(*)`)
+2. **Multi-row queries**: Return multiple rows as structured data (e.g., `SELECT id, name FROM users`)
 
-**File to create**: `internal/repository/repository.go`
+But the service layer shouldn't need to know about database drivers, connection pooling, SQL types, or NULL handling. That's infrastructure concern, not business logic.
 
-**Code**:
-```go
-// Defines the database repository interface for metric queries.
-package repository
+**Why use an interface**:
+- **Testability**: The service layer can use a mock repository in tests without touching a real database
+- **Flexibility**: We can swap SQLite for PostgreSQL later without changing service code
+- **Dependency inversion**: High-level code (services) doesn't depend on low-level code (SQL), both depend on the interface
 
-import "context"
+**Design decisions**:
 
-type Repository interface {
-	// QuerySingleValue executes a query and returns the first column of the first row.
-	// Returns an error if the query fails or returns no rows.
-	QuerySingleValue(ctx context.Context, query string, args ...interface{}) (interface{}, error)
+1. **Context for cancellation**: All query methods accept `context.Context` so requests can be cancelled if the client disconnects or times out
 
-	// QueryMultiRow executes a query and returns all rows as a slice of maps.
-	// Each map represents a row with column names as keys.
-	QueryMultiRow(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error)
+2. **Variadic args for parameters**: `args ...interface{}` allows passing any number of query parameters with proper SQL injection prevention
 
-	// Close closes the database connection and releases resources.
-	Close() error
-}
-```
+3. **Return types**:
+   - `QuerySingleValue` returns `interface{}` because the value could be int64, float64, string, or nil
+   - `QueryMultiRow` returns `[]map[string]interface{}` where each map is one row with column names as keys
+   - These generic types let us handle any query without knowing the schema ahead of time
 
-**No test needed yet**: This is just an interface definition.
+4. **Error handling**: Return errors rather than panicking - let callers decide how to handle failures
 
-**Commit**:
-```bash
-git add internal/repository/repository.go
-git commit -m "Define Repository interface"
-```
+**What to implement**:
+
+Create `internal/repository/repository.go` with:
+- A `Repository` interface defining three methods: `QuerySingleValue`, `QueryMultiRow`, and `Close`
+- Document what each method does and when it returns errors
+- Use `context.Context` as the first parameter (Go convention)
+
+**Commit** after creating the interface.
 
 ---
 
 ### Task 4.2: Install SQLite Driver
 
-**What you're doing**: Adding the pure-Go SQLite driver.
+**Why SQLite**:
+- **Zero configuration**: No separate database server to install or manage
+- **Perfect for local development**: The entire database is a single file
+- **Good enough for production**: Handles thousands of requests per second for read-heavy workloads like dashboards
+- **ACID compliant**: Full transaction support despite being "lite"
+
+**Why modernc.org/sqlite specifically**:
+- **Pure Go implementation**: No CGO dependency, which means:
+  - Easier cross-compilation (build for any OS from any OS)
+  - Simpler deployment (no native library dependencies)
+  - Better debugging (no C code)
+- **Drop-in replacement** for mattn/go-sqlite3 (the CGO version)
+- **Active maintenance** and good performance
 
 **Command**:
 ```bash
 go get modernc.org/sqlite
 ```
 
-**Why this driver**: It's pure Go (no CGO), which makes it easier to cross-compile and deploy.
+This is a direct dependency (unlike TOML which we imported first), so `go mod tidy` shouldn't be needed.
 
-**Commit**:
-```bash
-git add go.mod go.sum
-git commit -m "Add SQLite driver dependency"
-```
+**Commit** after verifying it appears in go.mod.
 
 ---
 
 ### Task 4.3: Implement SQLite Repository (TDD)
 
-**Step 1: Write tests**
+**The problem we're solving**: We need concrete implementations of `QuerySingleValue` and `QueryMultiRow` that:
+1. Handle Go's `database/sql` package correctly (it's verbose and easy to get wrong)
+2. Support different SQL types (INTEGER, TEXT, REAL, NULL)
+3. Convert `sql.Rows` into our generic `[]map[string]interface{}` format
+4. Respect context cancellation
+5. Handle edge cases (no rows, NULL values, connection errors)
 
-**File to create**: `internal/repository/sqlite_test.go`
+**Why this is complex**: Go's `database/sql` package is low-level. For `QueryMultiRow`, we need to:
+- Get column names from the result set
+- Create interface{} pointers for scanning (you can't scan into interface{} directly)
+- Build maps dynamically for each row
+- Handle NULL properly (it becomes nil in Go)
 
-**Code**:
-```go
-package repository
+**Architecture decisions**:
 
-import (
-	"context"
-	"testing"
-	"time"
-)
+1. **In-memory testing**: Use `:memory:` as the database path for tests. This gives us:
+   - Real SQL execution (not mocked)
+   - Fast tests (no disk I/O)
+   - Isolated tests (each test gets a fresh database)
+   - No test fixtures to maintain
 
-func setupTestDB(t *testing.T) Repository {
-	// Use in-memory SQLite database for testing
-	repo, err := NewSQLiteRepository(":memory:")
-	if err != nil {
-		t.Fatalf("failed to create test repository: %v", err)
-	}
+2. **Connection pooling**: Configure `SetMaxOpenConns` and `SetMaxIdleConns` for production use
 
-	// Create a test table
-	ctx := context.Background()
-	_, err = repo.(*SQLiteRepository).db.ExecContext(ctx, `
-		CREATE TABLE users (
-			id INTEGER PRIMARY KEY,
-			name TEXT NOT NULL,
-			age INTEGER,
-			balance REAL
-		)
-	`)
-	if err != nil {
-		t.Fatalf("failed to create test table: %v", err)
-	}
+3. **Error wrapping**: Wrap all errors with context about what operation failed
 
-	// Insert test data
-	_, err = repo.(*SQLiteRepository).db.ExecContext(ctx, `
-		INSERT INTO users (id, name, age, balance) VALUES
-		(1, 'Alice', 30, 100.50),
-		(2, 'Bob', 25, 200.75),
-		(3, 'Charlie', 35, NULL)
-	`)
-	if err != nil {
-		t.Fatalf("failed to insert test data: %v", err)
-	}
+4. **Blank import for driver**: Use `_ "modernc.org/sqlite"` to register the driver without directly using the package
 
-	return repo
-}
+**Testing strategy** (following TDD):
 
-func TestSQLiteRepository_QuerySingleValue(t *testing.T) {
-	repo := setupTestDB(t)
-	defer repo.Close()
+**What scenarios to test**:
 
-	ctx := context.Background()
+For **QuerySingleValue**:
+- Returns integer (COUNT queries)
+- Returns float (SUM of REAL columns)
+- Returns string (SELECT name queries)
+- Works with WHERE clauses and parameters
+- Returns error when no rows found (this is an error condition for single-value queries)
+- Respects context timeout
 
-	t.Run("query returns integer", func(t *testing.T) {
-		result, err := repo.QuerySingleValue(ctx, "SELECT COUNT(*) FROM users")
-		if err != nil {
-			t.Fatalf("QuerySingleValue() error = %v", err)
-		}
+For **QueryMultiRow**:
+- Returns multiple rows with correct structure
+- Each row is a `map[string]interface{}` with column names as keys
+- Handles NULL values (they become nil)
+- Works with WHERE clauses and parameters
+- Returns empty slice (not error) for zero results
+- Column types are preserved (int64, float64, string)
 
-		count, ok := result.(int64)
-		if !ok {
-			t.Fatalf("expected int64, got %T", result)
-		}
-		if count != 3 {
-			t.Errorf("got count %d, want 3", count)
-		}
-	})
+**Setup pattern**:
+Create a helper function `setupTestDB(t *testing.T)` that:
+1. Creates an in-memory repository
+2. Creates a test table with various column types
+3. Inserts sample data including NULL values
+4. Returns the repository for use in tests
 
-	t.Run("query returns float", func(t *testing.T) {
-		result, err := repo.QuerySingleValue(ctx, "SELECT balance FROM users WHERE id = 1")
-		if err != nil {
-			t.Fatalf("QuerySingleValue() error = %v", err)
-		}
+**Implementation approach**:
 
-		balance, ok := result.(float64)
-		if !ok {
-			t.Fatalf("expected float64, got %T", result)
-		}
-		if balance != 100.50 {
-			t.Errorf("got balance %f, want 100.50", balance)
-		}
-	})
+Create `internal/repository/sqlite.go` with:
 
-	t.Run("query returns string", func(t *testing.T) {
-		result, err := repo.QuerySingleValue(ctx, "SELECT name FROM users WHERE id = 2")
-		if err != nil {
-			t.Fatalf("QuerySingleValue() error = %v", err)
-		}
+1. **SQLiteRepository struct**:
+   - Holds a `*sql.DB` connection
+   - Implements the Repository interface
 
-		name, ok := result.(string)
-		if !ok {
-			t.Fatalf("expected string, got %T", result)
-		}
-		if name != "Bob" {
-			t.Errorf("got name %s, want Bob", name)
-		}
-	})
+2. **NewSQLiteRepository constructor**:
+   - Takes a path (file or ":memory:")
+   - Opens database with `sql.Open("sqlite", path)`
+   - Configures connection pool
+   - Pings to verify connection
+   - Returns error if connection fails
 
-	t.Run("query with WHERE clause", func(t *testing.T) {
-		result, err := repo.QuerySingleValue(ctx, "SELECT name FROM users WHERE age > ?", 30)
-		if err != nil {
-			t.Fatalf("QuerySingleValue() error = %v", err)
-		}
+3. **QuerySingleValue implementation**:
+   - Use `db.QueryRowContext()` (returns single row)
+   - Scan into `interface{}`
+   - Check for `sql.ErrNoRows` specifically (this should be an error)
+   - Return the scanned value
 
-		name := result.(string)
-		if name != "Charlie" {
-			t.Errorf("got name %s, want Charlie", name)
-		}
-	})
+4. **QueryMultiRow implementation**:
+   - Use `db.QueryContext()` (returns multiple rows)
+   - Call `rows.Columns()` to get column names
+   - For each row:
+     - Create slice of `interface{}` values
+     - Create slice of pointers to those values (for Scan)
+     - Call `rows.Scan(valuePtrs...)`
+     - Build `map[string]interface{}` pairing columns with values
+   - Check `rows.Err()` after iteration
+   - Return slice of maps
 
-	t.Run("query returns no rows", func(t *testing.T) {
-		_, err := repo.QuerySingleValue(ctx, "SELECT name FROM users WHERE id = 999")
-		if err == nil {
-			t.Error("expected error for no rows, got nil")
-		}
-	})
+5. **Close implementation**:
+   - Simply call `db.Close()`
 
-	t.Run("context timeout", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-		defer cancel()
-		time.Sleep(1 * time.Millisecond) // Ensure context is expired
+**Key Go patterns**:
+- Use `defer rows.Close()` immediately after getting rows
+- The double-indirection pattern for scanning: `valuePtrs[i] = &values[i]`
+- Check `rows.Err()` after the loop (errors can occur during iteration)
+- Use context-aware methods (`QueryRowContext`, `QueryContext`)
 
-		_, err := repo.QuerySingleValue(ctx, "SELECT COUNT(*) FROM users")
-		if err == nil {
-			t.Error("expected context timeout error")
-		}
-	})
-}
+**What success looks like**: Tests pass, and you've verified:
+- Different SQL types work correctly
+- NULL handling works
+- Parameter passing works
+- Error cases are handled
+- Context cancellation works
 
-func TestSQLiteRepository_QueryMultiRow(t *testing.T) {
-	repo := setupTestDB(t)
-	defer repo.Close()
-
-	ctx := context.Background()
-
-	t.Run("query returns multiple rows", func(t *testing.T) {
-		rows, err := repo.QueryMultiRow(ctx, "SELECT id, name, age FROM users ORDER BY id")
-		if err != nil {
-			t.Fatalf("QueryMultiRow() error = %v", err)
-		}
-
-		if len(rows) != 3 {
-			t.Fatalf("got %d rows, want 3", len(rows))
-		}
-
-		// Check first row
-		if rows[0]["id"].(int64) != 1 {
-			t.Errorf("row 0 id = %v, want 1", rows[0]["id"])
-		}
-		if rows[0]["name"].(string) != "Alice" {
-			t.Errorf("row 0 name = %v, want Alice", rows[0]["name"])
-		}
-
-		// Check NULL value handling
-		if rows[2]["balance"] != nil {
-			t.Errorf("row 2 balance = %v, want nil", rows[2]["balance"])
-		}
-	})
-
-	t.Run("query with WHERE clause", func(t *testing.T) {
-		rows, err := repo.QueryMultiRow(ctx, "SELECT name FROM users WHERE age < ?", 30)
-		if err != nil {
-			t.Fatalf("QueryMultiRow() error = %v", err)
-		}
-
-		if len(rows) != 1 {
-			t.Fatalf("got %d rows, want 1", len(rows))
-		}
-		if rows[0]["name"].(string) != "Bob" {
-			t.Errorf("got name %v, want Bob", rows[0]["name"])
-		}
-	})
-
-	t.Run("query returns empty result", func(t *testing.T) {
-		rows, err := repo.QueryMultiRow(ctx, "SELECT * FROM users WHERE id > 1000")
-		if err != nil {
-			t.Fatalf("QueryMultiRow() error = %v", err)
-		}
-
-		if len(rows) != 0 {
-			t.Errorf("got %d rows, want 0", len(rows))
-		}
-	})
-}
-```
-
-**Run tests** (they'll fail):
-```bash
-go test ./internal/repository/
-```
-
-**Step 2: Implement the SQLite repository**
-
-**File to create**: `internal/repository/sqlite.go`
-
-**Code**:
-```go
-// Implements the repository interface using SQLite.
-package repository
-
-import (
-	"context"
-	"database/sql"
-	"fmt"
-
-	_ "modernc.org/sqlite" // Import SQLite driver
-)
-
-type SQLiteRepository struct {
-	db *sql.DB
-}
-
-// NewSQLiteRepository creates a new SQLite repository.
-// The path parameter can be a file path or ":memory:" for an in-memory database.
-func NewSQLiteRepository(path string) (Repository, error) {
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	// Configure connection pool
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-
-	// Verify connection
-	if err := db.Ping(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	return &SQLiteRepository{db: db}, nil
-}
-
-func (r *SQLiteRepository) QuerySingleValue(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
-	row := r.db.QueryRowContext(ctx, query, args...)
-
-	var result interface{}
-	if err := row.Scan(&result); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("query returned no rows")
-		}
-		return nil, fmt.Errorf("failed to scan result: %w", err)
-	}
-
-	return result, nil
-}
-
-func (r *SQLiteRepository) QueryMultiRow(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
-	}
-	defer rows.Close()
-
-	// Get column names
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get columns: %w", err)
-	}
-
-	var results []map[string]interface{}
-
-	for rows.Next() {
-		// Create a slice of interface{} to hold each column value
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range values {
-			valuePtrs[i] = &values[i]
-		}
-
-		// Scan the row
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, fmt.Errorf("failed to scan row: %w", err)
-		}
-
-		// Build map for this row
-		rowMap := make(map[string]interface{})
-		for i, col := range columns {
-			rowMap[col] = values[i]
-		}
-
-		results = append(results, rowMap)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
-	}
-
-	return results, nil
-}
-
-func (r *SQLiteRepository) Close() error {
-	return r.db.Close()
-}
-```
-
-**Run tests**:
-```bash
-go test ./internal/repository/ -v
-```
-
-All tests should pass!
-
-**Commit**:
-```bash
-git add internal/repository/
-git commit -m "Implement SQLite repository with comprehensive tests"
-```
+**Commit** after all tests pass.
 
 ---
 
 ## Phase 5: Service Layer
 
+The service layer contains business logic that orchestrates between repositories and HTTP handlers. It validates parameters, executes queries, and handles concurrent execution of multiple metrics.
+
 ### Task 5.1: Install errgroup Dependency
 
-**What you're doing**: Adding the errgroup package for concurrent execution.
+**Why we need this**: The `errgroup` package provides coordinated error handling for goroutines. When fetching multiple metrics concurrently, we need to wait for all goroutines to complete and collect any errors that occur.
+
+**What you're achieving**: Adding golang.org/x/sync/errgroup for concurrent metric execution.
 
 **Command**:
 ```bash
 go get golang.org/x/sync/errgroup
 ```
 
-**Commit**:
-```bash
-git add go.mod go.sum
-git commit -m "Add errgroup dependency for concurrent execution"
-```
+**Commit** after verifying dependency appears in go.mod.
 
 ---
 
 ### Task 5.2: Implement Parameter Conversion Helper (TDD)
 
-**What you're doing**: Converting URL query parameter strings to the correct Go types.
+**The problem we're solving**: HTTP query parameters arrive as strings (e.g., "?min_age=25"), but our database queries need typed values (int64, float64, string). We need type-safe conversion that fails fast with clear errors when the conversion isn't valid.
 
-**File to create**: `internal/service/params_test.go`
+**Why this matters**: Without proper validation, "?min_age=abc" would silently fail or cause runtime panics. We want to return a 400 Bad Request with a clear error message instead.
 
-**Code**:
-```go
-package service
+**Architecture decisions**:
 
-import (
-	"testing"
+1. **Type safety**: The `convertParamValue` function takes a `ParamType` enum (not a string) to ensure only valid types are converted
 
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
+2. **Error wrapping**: Use `fmt.Errorf` with `%w` to preserve the underlying strconv error while adding context about which parameter failed
 
-func TestConvertParamValue(t *testing.T) {
-	tests := []struct {
-		name      string
-		value     string
-		paramType models.ParamType
-		want      interface{}
-		wantErr   bool
-	}{
-		{
-			name:      "string value",
-			value:     "hello",
-			paramType: models.ParamTypeString,
-			want:      "hello",
-			wantErr:   false,
-		},
-		{
-			name:      "int value",
-			value:     "42",
-			paramType: models.ParamTypeInt,
-			want:      int64(42),
-			wantErr:   false,
-		},
-		{
-			name:      "negative int",
-			value:     "-10",
-			paramType: models.ParamTypeInt,
-			want:      int64(-10),
-			wantErr:   false,
-		},
-		{
-			name:      "invalid int",
-			value:     "not-a-number",
-			paramType: models.ParamTypeInt,
-			want:      nil,
-			wantErr:   true,
-		},
-		{
-			name:      "float value",
-			value:     "3.14",
-			paramType: models.ParamTypeFloat,
-			want:      float64(3.14),
-			wantErr:   false,
-		},
-		{
-			name:      "invalid float",
-			value:     "abc",
-			paramType: models.ParamTypeFloat,
-			want:      nil,
-			wantErr:   true,
-		},
-	}
+3. **Return interface{}**: Since the caller doesn't know the type at compile time, we return `interface{}` but document the possible return types (int64, float64, string)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := convertParamValue(tt.value, tt.paramType)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("convertParamValue() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("convertParamValue() = %v (%T), want %v (%T)", got, got, tt.want, tt.want)
-			}
-		})
-	}
-}
-```
+**Testing strategy** (following TDD):
 
-**Run tests** (will fail):
-```bash
-go test ./internal/service/
-```
+Write tests covering:
+- Valid conversions for each type (string, int, float)
+- Edge cases (negative numbers, decimals)
+- Invalid conversions (letters when expecting numbers)
+- Boundary values (very large numbers, special characters)
 
-**File to create**: `internal/service/params.go`
+Create `internal/service/params_test.go` with test cases for each scenario. Then implement `internal/service/params.go` with a `convertParamValue` function that uses Go's `strconv` package.
 
-**Code**:
-```go
-// Converts URL query parameters to typed values for database queries.
-package service
+**What success looks like**: Tests pass, and the implementation correctly converts strings to typed values or returns descriptive errors.
 
-import (
-	"fmt"
-	"strconv"
-
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
-
-func convertParamValue(value string, paramType models.ParamType) (interface{}, error) {
-	switch paramType {
-	case models.ParamTypeString:
-		return value, nil
-
-	case models.ParamTypeInt:
-		intVal, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid integer value %q: %w", value, err)
-		}
-		return intVal, nil
-
-	case models.ParamTypeFloat:
-		floatVal, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid float value %q: %w", value, err)
-		}
-		return floatVal, nil
-
-	default:
-		return nil, fmt.Errorf("unsupported parameter type: %s", paramType)
-	}
-}
-```
-
-**Run tests**:
-```bash
-go test ./internal/service/
-```
-
-**Commit**:
-```bash
-git add internal/service/
-git commit -m "Add parameter conversion with type validation"
-```
+**Commit** after tests pass.
 
 ---
 
 ### Task 5.3: Implement MetricService (TDD)
 
-This is a larger task, so we'll break it into sub-steps.
-
-**File to create**: `internal/service/metric_service_test.go`
-
-**Code (Part 1 - test setup and simple tests)**:
-```go
-package service
-
-import (
-	"context"
-	"errors"
-	"testing"
-
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
-
-type mockRepository struct {
-	singleValueFunc func(ctx context.Context, query string, args ...interface{}) (interface{}, error)
-	multiRowFunc    func(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error)
-}
-
-func (m *mockRepository) QuerySingleValue(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
-	if m.singleValueFunc != nil {
-		return m.singleValueFunc(ctx, query, args...)
-	}
-	return nil, errors.New("not implemented")
-}
-
-func (m *mockRepository) QueryMultiRow(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
-	if m.multiRowFunc != nil {
-		return m.multiRowFunc(ctx, query, args...)
-	}
-	return nil, errors.New("not implemented")
-}
-
-func (m *mockRepository) Close() error {
-	return nil
-}
-
-func TestNewMetricService(t *testing.T) {
-	repo := &mockRepository{}
-	metrics := []models.Metric{
-		{Name: "test", Query: "SELECT 1", MultiRow: false},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	if service == nil {
-		t.Error("NewMetricService returned nil")
-	}
-}
-
-func TestMetricService_GetMetricNames(t *testing.T) {
-	repo := &mockRepository{}
-	metrics := []models.Metric{
-		{Name: "metric1", Query: "SELECT 1", MultiRow: false},
-		{Name: "metric2", Query: "SELECT 2", MultiRow: false},
-		{Name: "metric3", Query: "SELECT 3", MultiRow: false},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	names := service.GetMetricNames()
-
-	if len(names) != 3 {
-		t.Errorf("got %d names, want 3", len(names))
-	}
-
-	expectedNames := map[string]bool{"metric1": true, "metric2": true, "metric3": true}
-	for _, name := range names {
-		if !expectedNames[name] {
-			t.Errorf("unexpected metric name: %s", name)
-		}
-	}
-}
-
-func TestMetricService_GetMetric_SingleValue(t *testing.T) {
-	repo := &mockRepository{
-		singleValueFunc: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
-			if query == "SELECT COUNT(*) FROM users" {
-				return int64(42), nil
-			}
-			return nil, errors.New("unexpected query")
-		},
-	}
-
-	metrics := []models.Metric{
-		{
-			Name:     "user_count",
-			Query:    "SELECT COUNT(*) FROM users",
-			MultiRow: false,
-		},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	ctx := context.Background()
-
-	result, err := service.GetMetric(ctx, "user_count", nil)
-	if err != nil {
-		t.Fatalf("GetMetric() error = %v", err)
-	}
-
-	if result.Name != "user_count" {
-		t.Errorf("result.Name = %s, want user_count", result.Name)
-	}
-
-	value, ok := result.Value.(int64)
-	if !ok {
-		t.Fatalf("expected int64 value, got %T", result.Value)
-	}
-	if value != 42 {
-		t.Errorf("value = %d, want 42", value)
-	}
-}
-
-func TestMetricService_GetMetric_MultiRow(t *testing.T) {
-	repo := &mockRepository{
-		multiRowFunc: func(ctx context.Context, query string, args ...interface{}) ([]map[string]interface{}, error) {
-			return []map[string]interface{}{
-				{"id": int64(1), "name": "Alice"},
-				{"id": int64(2), "name": "Bob"},
-			}, nil
-		},
-	}
-
-	metrics := []models.Metric{
-		{
-			Name:     "users_list",
-			Query:    "SELECT id, name FROM users",
-			MultiRow: true,
-		},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	ctx := context.Background()
-
-	result, err := service.GetMetric(ctx, "users_list", nil)
-	if err != nil {
-		t.Fatalf("GetMetric() error = %v", err)
-	}
-
-	rows, ok := result.Value.([]map[string]interface{})
-	if !ok {
-		t.Fatalf("expected []map[string]interface{}, got %T", result.Value)
-	}
-
-	if len(rows) != 2 {
-		t.Errorf("got %d rows, want 2", len(rows))
-	}
-}
-
-func TestMetricService_GetMetric_WithParams(t *testing.T) {
-	repo := &mockRepository{
-		singleValueFunc: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
-			// Verify parameters were passed correctly
-			if len(args) != 1 {
-				t.Errorf("expected 1 arg, got %d", len(args))
-			}
-			if args[0] != int64(5) {
-				t.Errorf("expected arg 5, got %v", args[0])
-			}
-			return int64(100), nil
-		},
-	}
-
-	metrics := []models.Metric{
-		{
-			Name:     "users_over_age",
-			Query:    "SELECT COUNT(*) FROM users WHERE age > ?",
-			MultiRow: false,
-			Params: []models.ParamDefinition{
-				{Name: "min_age", Type: models.ParamTypeInt, Required: true},
-			},
-		},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	ctx := context.Background()
-
-	params := map[string]string{"min_age": "5"}
-	result, err := service.GetMetric(ctx, "users_over_age", params)
-	if err != nil {
-		t.Fatalf("GetMetric() error = %v", err)
-	}
-
-	if result.Value.(int64) != 100 {
-		t.Errorf("value = %v, want 100", result.Value)
-	}
-}
-
-func TestMetricService_GetMetric_MissingRequiredParam(t *testing.T) {
-	repo := &mockRepository{}
-
-	metrics := []models.Metric{
-		{
-			Name:     "test",
-			Query:    "SELECT * FROM users WHERE id = ?",
-			MultiRow: false,
-			Params: []models.ParamDefinition{
-				{Name: "user_id", Type: models.ParamTypeInt, Required: true},
-			},
-		},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	ctx := context.Background()
-
-	_, err := service.GetMetric(ctx, "test", nil)
-	if err == nil {
-		t.Error("expected error for missing required parameter")
-	}
-}
-
-func TestMetricService_GetMetric_NotFound(t *testing.T) {
-	repo := &mockRepository{}
-	service := NewMetricService(repo, []models.Metric{}, nil)
-	ctx := context.Background()
-
-	_, err := service.GetMetric(ctx, "nonexistent", nil)
-	if err == nil {
-		t.Error("expected error for nonexistent metric")
-	}
-}
-```
-
-**Run tests** (will fail):
-```bash
-go test ./internal/service/
-```
-
-**File to create**: `internal/service/metric_service.go`
-
-**Code**:
-```go
-// Executes metric queries with parameter validation and concurrent execution.
-package service
-
-import (
-	"context"
-	"fmt"
-	"log/slog"
-
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/repository"
-	"golang.org/x/sync/errgroup"
-)
-
-type MetricService struct {
-	repo    repository.Repository
-	metrics map[string]models.Metric
-	logger  *slog.Logger
-}
-
-func NewMetricService(repo repository.Repository, metrics []models.Metric, logger *slog.Logger) *MetricService {
-	// Build a map for fast metric lookup
-	metricMap := make(map[string]models.Metric)
-	for _, m := range metrics {
-		metricMap[m.Name] = m
-	}
-
-	return &MetricService{
-		repo:    repo,
-		metrics: metricMap,
-		logger:  logger,
-	}
-}
-
-func (s *MetricService) GetMetricNames() []string {
-	names := make([]string, 0, len(s.metrics))
-	for name := range s.metrics {
-		names = append(names, name)
-	}
-	return names
-}
-
-func (s *MetricService) GetMetric(ctx context.Context, name string, params map[string]string) (models.MetricResult, error) {
-	// Find metric definition
-	metric, exists := s.metrics[name]
-	if !exists {
-		return models.MetricResult{}, fmt.Errorf("metric not found: %s", name)
-	}
-
-	// Validate and convert parameters
-	args, err := s.prepareParams(metric, params)
-	if err != nil {
-		return models.MetricResult{}, fmt.Errorf("invalid parameters: %w", err)
-	}
-
-	// Execute query based on metric type
-	var value interface{}
-	if metric.MultiRow {
-		value, err = s.repo.QueryMultiRow(ctx, metric.Query, args...)
-	} else {
-		value, err = s.repo.QuerySingleValue(ctx, metric.Query, args...)
-	}
-
-	if err != nil {
-		return models.MetricResult{}, fmt.Errorf("query failed: %w", err)
-	}
-
-	return models.MetricResult{
-		Name:  name,
-		Value: value,
-	}, nil
-}
-
-func (s *MetricService) GetMetrics(ctx context.Context, names []string, params map[string]string) ([]models.MetricResult, error) {
-	results := make([]models.MetricResult, len(names))
-	g, ctx := errgroup.WithContext(ctx)
-
-	for i, name := range names {
-		i, name := i, name // Capture loop variables
-		g.Go(func() error {
-			result, err := s.GetMetric(ctx, name, params)
-			if err != nil {
-				return fmt.Errorf("metric %s: %w", name, err)
-			}
-			results[i] = result
-			return nil
-		})
-	}
-
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
-}
-
-func (s *MetricService) prepareParams(metric models.Metric, params map[string]string) ([]interface{}, error) {
-	if len(metric.Params) == 0 {
-		return nil, nil
-	}
-
-	args := make([]interface{}, len(metric.Params))
-
-	for i, paramDef := range metric.Params {
-		value, exists := params[paramDef.Name]
-
-		// Check if required parameter is missing
-		if !exists {
-			if paramDef.Required {
-				return nil, fmt.Errorf("required parameter missing: %s", paramDef.Name)
-			}
-			// Optional parameter not provided - use nil
-			args[i] = nil
-			continue
-		}
-
-		// Convert to correct type
-		converted, err := convertParamValue(value, paramDef.Type)
-		if err != nil {
-			return nil, fmt.Errorf("parameter %s: %w", paramDef.Name, err)
-		}
-		args[i] = converted
-	}
-
-	return args, nil
-}
-```
-
-**Run tests**:
-```bash
-go test ./internal/service/ -v
-```
-
-All tests should pass!
-
-**Add a test for concurrent execution**:
-
-**Add to `metric_service_test.go`**:
-```go
-func TestMetricService_GetMetrics_Concurrent(t *testing.T) {
-	callCount := 0
-	repo := &mockRepository{
-		singleValueFunc: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
-			callCount++
-			return int64(callCount), nil
-		},
-	}
-
-	metrics := []models.Metric{
-		{Name: "metric1", Query: "SELECT 1", MultiRow: false},
-		{Name: "metric2", Query: "SELECT 2", MultiRow: false},
-		{Name: "metric3", Query: "SELECT 3", MultiRow: false},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	ctx := context.Background()
-
-	results, err := service.GetMetrics(ctx, []string{"metric1", "metric2", "metric3"}, nil)
-	if err != nil {
-		t.Fatalf("GetMetrics() error = %v", err)
-	}
-
-	if len(results) != 3 {
-		t.Errorf("got %d results, want 3", len(results))
-	}
-
-	// Verify all metrics were called
-	if callCount != 3 {
-		t.Errorf("repository was called %d times, want 3", callCount)
-	}
-}
-
-func TestMetricService_GetMetrics_ErrorHandling(t *testing.T) {
-	repo := &mockRepository{
-		singleValueFunc: func(ctx context.Context, query string, args ...interface{}) (interface{}, error) {
-			if query == "SELECT 2" {
-				return nil, errors.New("database error")
-			}
-			return int64(1), nil
-		},
-	}
-
-	metrics := []models.Metric{
-		{Name: "metric1", Query: "SELECT 1", MultiRow: false},
-		{Name: "metric2", Query: "SELECT 2", MultiRow: false},
-	}
-
-	service := NewMetricService(repo, metrics, nil)
-	ctx := context.Background()
-
-	_, err := service.GetMetrics(ctx, []string{"metric1", "metric2"}, nil)
-	if err == nil {
-		t.Error("expected error when one metric fails")
-	}
-}
-```
-
-**Run tests again**:
-```bash
-go test ./internal/service/ -v
-```
-
-**Commit**:
-```bash
-git add internal/service/
-git commit -m "Implement MetricService with concurrent execution and comprehensive tests"
-```
+**The problem we're solving**: The HTTP layer needs a service that can:
+1. Return a list of available metric names
+2. Execute a single metric query with parameter validation
+3. Execute multiple metrics concurrently and collect results
+4. Handle errors from any layer (parameter validation, database queries)
+
+**Why concurrent execution**: Dashboard UIs often request multiple metrics at once. Sequential execution would mean total latency = sum of all query times. Concurrent execution with `errgroup` means total latency ≈ slowest query time.
+
+**Architecture decisions**:
+
+1. **Map-based metric lookup**: Store metrics in a `map[string]models.Metric` for O(1) lookup by name instead of linear search through a slice
+
+2. **Interface-based repository**: The service depends on a `repository.Repository` interface, not a concrete SQLite implementation. This makes testing trivial - we can use a mock repository without touching a database.
+
+3. **Context propagation**: All methods accept `context.Context` as the first parameter (Go convention). This allows:
+   - Request cancellation if the HTTP client disconnects
+   - Timeout enforcement
+   - Trace ID propagation (for distributed tracing)
+
+4. **Parameter preparation**: Extract parameter validation and conversion into a separate `prepareParams` method. This method:
+   - Checks that required parameters are present
+   - Converts string values to the correct types
+   - Returns a `[]interface{}` that can be passed directly to the repository's query methods
+
+5. **Concurrent execution with errgroup**: For `GetMetrics`, use `errgroup.WithContext` which:
+   - Runs each query in its own goroutine
+   - Cancels all remaining queries if any query fails (fail-fast)
+   - Collects the first error encountered
+   - Waits for all goroutines to complete before returning
+
+**Testing strategy** (following TDD):
+
+**Step 1: Write tests**
+
+Create `internal/service/metric_service_test.go` with:
+
+- **Mock repository**: A test double that implements `repository.Repository` with configurable behavior
+- **Test constructor**: Verify `NewMetricService` builds the metric map correctly
+- **Test GetMetricNames**: Verify it returns all metric names
+- **Test GetMetric (single value)**: Verify it calls the repository correctly for non-multi-row metrics
+- **Test GetMetric (multi row)**: Verify it handles multi-row results
+- **Test GetMetric (with parameters)**: Verify parameters are converted and passed correctly
+- **Test GetMetric (missing required param)**: Verify validation errors are returned
+- **Test GetMetric (not found)**: Verify error when metric name doesn't exist
+- **Test GetMetrics (concurrent)**: Verify multiple metrics are fetched
+- **Test GetMetrics (error handling)**: Verify that if one metric fails, the whole batch fails
+
+**Step 2: Implement**
+
+Create `internal/service/metric_service.go` with:
+
+1. **MetricService struct**: Holds repository, metrics map, and logger
+2. **NewMetricService**: Builds the map from the slice
+3. **GetMetricNames**: Iterates the map and returns keys
+4. **GetMetric**: Looks up metric, validates/converts params, calls appropriate repository method
+5. **GetMetrics**: Uses errgroup to execute queries concurrently
+6. **prepareParams helper**: Validates presence of required params and converts types
+
+**Key Go patterns**:
+- Use `i, name := i, name` to capture loop variables in goroutines (Go 1.21 and earlier)
+- Check the `exists` boolean from map lookups
+- Use `make([]interface{}, len(metric.Params))` to pre-allocate the args slice
+
+**What success looks like**: All tests pass, including the concurrent execution test that verifies multiple metrics are fetched in parallel.
+
+**Commit** after all tests pass.
 
 ---
 
 ## Phase 6: HTTP API Layer
 
+The HTTP layer translates between HTTP requests/responses and the service layer. It handles routing, parameter extraction, JSON serialization, and error responses.
+
 ### Task 6.1: Install Chi Router
+
+**Why Chi**: Chi is a lightweight, idiomatic HTTP router for Go that:
+- Uses only standard library types (`http.Handler`, `http.ResponseWriter`)
+- Supports middleware composition
+- Provides URL parameter extraction (`/metrics/{name}`)
+- Has no external dependencies beyond the standard library
 
 **Command**:
 ```bash
 go get github.com/go-chi/chi/v5
 ```
 
-**Commit**:
-```bash
-git add go.mod go.sum
-git commit -m "Add chi router dependency"
-```
+**Commit** after verifying dependency appears in go.mod.
 
 ---
 
 ### Task 6.2: Implement HTTP Handlers (TDD)
 
-Due to length constraints, I'll provide a condensed version focusing on key patterns.
+**The problem we're solving**: We need HTTP handlers that:
+1. Extract URL parameters and query strings
+2. Call the service layer with proper context
+3. Serialize results to JSON
+4. Return appropriate HTTP status codes and error responses
 
-**File to create**: `internal/api/handlers/metrics_test.go`
+**Architecture decisions**:
 
-**Code (abbreviated - showing pattern)**:
-```go
-package handlers
+1. **Handler struct with dependencies**: Create a `MetricsHandler` struct that holds a `MetricService` interface (not the concrete type) and a logger. This allows testing with a mock service.
 
-import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"testing"
+2. **Interface for the service**: Define a `MetricService` interface in the handlers package that declares only the methods the handlers need. This is the Interface Segregation Principle - handlers shouldn't know about internal service details.
 
-	"github.com/go-chi/chi/v5"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
+3. **Consistent error responses**: All errors return JSON in the format `{"error": "message"}`. This makes client-side error handling predictable.
 
-type mockMetricService struct {
-	getNamesFunc  func() []string
-	getMetricFunc func(ctx context.Context, name string, params map[string]string) (models.MetricResult, error)
-	getMetricsFunc func(ctx context.Context, names []string, params map[string]string) ([]models.MetricResult, error)
-}
+4. **Route design**:
+   - `GET /metrics` - Returns list of metric names (or multiple metrics if `?names=` param exists)
+   - `GET /metrics/{name}` - Returns a single metric result
+   - Both endpoints extract query parameters and pass them to the service for validation
 
-func (m *mockMetricService) GetMetricNames() []string {
-	if m.getNamesFunc != nil {
-		return m.getNamesFunc()
-	}
-	return nil
-}
+**Testing strategy** (following TDD):
 
-func (m *mockMetricService) GetMetric(ctx context.Context, name string, params map[string]string) (models.MetricResult, error) {
-	if m.getMetricFunc != nil {
-		return m.getMetricFunc(ctx, name, params)
-	}
-	return models.MetricResult{}, nil
-}
+Create `internal/api/handlers/metrics_test.go` with:
 
-func (m *mockMetricService) GetMetrics(ctx context.Context, names []string, params map[string]string) ([]models.MetricResult, error) {
-	if m.getMetricsFunc != nil {
-		return m.getMetricsFunc(ctx, names, params)
-	}
-	return nil, nil
-}
+- **Mock service**: Implements the `MetricService` interface with configurable responses
+- **httptest for HTTP testing**: Use `httptest.NewRequest` and `httptest.NewRecorder` to test handlers without starting a real server
+- **Chi context for URL params**: Use `chi.NewRouteContext()` to simulate URL parameter extraction
+- **JSON decoding assertions**: Decode the response body and verify the structure
 
-func TestListMetrics(t *testing.T) {
-	service := &mockMetricService{
-		getNamesFunc: func() []string {
-			return []string{"metric1", "metric2"}
-		},
-	}
+Test cases:
+- ListMetrics returns JSON array of names
+- GetSingleMetric extracts name from URL and returns result
+- GetMultipleMetrics parses comma-separated names
+- Error cases return proper status codes and error JSON
 
-	handler := NewMetricsHandler(service, nil)
+**Implementation**:
 
-	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	w := httptest.NewRecorder()
+Create `internal/api/handlers/metrics.go` with:
 
-	handler.ListMetrics(w, req)
+1. **MetricService interface**: Declares `GetMetricNames`, `GetMetric`, `GetMetrics`
+2. **MetricsHandler struct**: Holds service and logger
+3. **List handler**: Calls service.GetMetricNames() and returns JSON
+4. **Single metric handler**: Extracts `{name}` from URL using `chi.URLParam`, extracts query params, calls service
+5. **Multiple metrics handler**: Extracts `?names=` param, splits by comma, calls service
+6. **Helper methods**: `respondJSON` and `respondError` for consistent response format
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-	}
+**What success looks like**: All handler tests pass, and the implementation correctly translates between HTTP and the service layer.
 
-	var names []string
-	if err := json.NewDecoder(w.Body).Decode(&names); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if len(names) != 2 {
-		t.Errorf("got %d names, want 2", len(names))
-	}
-}
-
-func TestGetSingleMetric(t *testing.T) {
-	service := &mockMetricService{
-		getMetricFunc: func(ctx context.Context, name string, params map[string]string) (models.MetricResult, error) {
-			return models.MetricResult{
-				Name:  name,
-				Value: int64(42),
-			}, nil
-		},
-	}
-
-	handler := NewMetricsHandler(service, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/metrics/test_metric", nil)
-	w := httptest.NewRecorder()
-
-	// Set up chi context
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("name", "test_metric")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	handler.GetSingleMetric(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	var results []models.MetricResult
-	if err := json.NewDecoder(w.Body).Decode(&results); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Errorf("got %d results, want 1", len(results))
-	}
-	if results[0].Name != "test_metric" {
-		t.Errorf("name = %s, want test_metric", results[0].Name)
-	}
-}
-
-```
-
-**File to create**: `internal/api/handlers/metrics.go`
-
-**Code**:
-```go
-// HTTP handlers for metrics API endpoints.
-package handlers
-
-import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log/slog"
-	"net/http"
-	"strings"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/models"
-)
-
-type MetricService interface {
-	GetMetricNames() []string
-	GetMetric(ctx context.Context, name string, params map[string]string) (models.MetricResult, error)
-	GetMetrics(ctx context.Context, names []string, params map[string]string) ([]models.MetricResult, error)
-}
-
-type MetricsHandler struct {
-	service MetricService
-	logger  *slog.Logger
-}
-
-func NewMetricsHandler(service MetricService, logger *slog.Logger) *MetricsHandler {
-	return &MetricsHandler{
-		service: service,
-		logger:  logger,
-	}
-}
-
-func (h *MetricsHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
-	names := h.service.GetMetricNames()
-	h.respondJSON(w, http.StatusOK, names)
-}
-
-func (h *MetricsHandler) GetSingleMetric(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "name")
-	params := extractQueryParams(r)
-
-	result, err := h.service.GetMetric(r.Context(), name, params)
-	if err != nil {
-		h.respondError(w, http.StatusInternalServerError, fmt.Sprintf("metric %s failed: %v", name, err))
-		return
-	}
-
-	h.respondJSON(w, http.StatusOK, []models.MetricResult{result})
-}
-
-func (h *MetricsHandler) GetMultipleMetrics(w http.ResponseWriter, r *http.Request) {
-	// Parse comma-separated metric names from query param
-	namesParam := r.URL.Query().Get("names")
-	if namesParam == "" {
-		h.respondError(w, http.StatusBadRequest, "missing 'names' query parameter")
-		return
-	}
-
-	names := strings.Split(namesParam, ",")
-	for i, name := range names {
-		names[i] = strings.TrimSpace(name)
-	}
-
-	params := extractQueryParams(r)
-	delete(params, "names") // Remove 'names' from params
-
-	results, err := h.service.GetMetrics(r.Context(), names, params)
-	if err != nil {
-		h.respondError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	h.respondJSON(w, http.StatusOK, results)
-}
-
-func extractQueryParams(r *http.Request) map[string]string {
-	params := make(map[string]string)
-	for key, values := range r.URL.Query() {
-		if len(values) > 0 {
-			params[key] = values[0] // Take first value if multiple provided
-		}
-	}
-	return params
-}
-
-func (h *MetricsHandler) respondJSON(w http.ResponseWriter, status int, data interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		if h.logger != nil {
-			h.logger.Error("failed to encode JSON response", "error", err)
-		}
-	}
-}
-
-func (h *MetricsHandler) respondError(w http.ResponseWriter, status int, message string) {
-	h.respondJSON(w, status, map[string]string{"error": message})
-}
-```
-
-**Run tests**:
-```bash
-go test ./internal/api/handlers/
-```
-
-**Commit**:
-```bash
-git add internal/api/handlers/
-git commit -m "Implement HTTP handlers with tests"
-```
+**Commit** after tests pass.
 
 ---
 
 ### Task 6.3: Create Router Setup
 
-**File to create**: `internal/api/router.go`
+**The problem we're solving**: We need to wire up:
+- HTTP routes to handlers
+- Middleware for logging, recovery, timeouts
+- Request lifecycle management
 
-**Code**:
-```go
-// Configures HTTP routes and middleware for the metrics API.
-package api
+**Architecture decisions**:
 
-import (
-	"log/slog"
-	"time"
+1. **Middleware chain**: Use Chi's middleware composition to add:
+   - Request ID generation (for tracing)
+   - Real IP extraction (for logging behind proxies)
+   - Request logging (log method, path, status, duration)
+   - Panic recovery (convert panics to 500 errors)
+   - Timeouts (prevent long-running requests)
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
-)
+2. **Route organization**: Use a factory function `NewRouter` that takes dependencies (handler, logger) and returns a configured `*chi.Mux`
 
-func NewRouter(metricsHandler *handlers.MetricsHandler, logger *slog.Logger) *chi.Mux {
-	r := chi.NewRouter()
+3. **Conditional routing**: The `/metrics` endpoint checks for the presence of `?names=` to decide whether to list all metrics or fetch specific ones
 
-	// Middleware
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(requestLogger(logger))
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+**Implementation**:
 
-	// Routes
-	r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		// Check if 'names' param exists to determine which handler to use
-		if r.URL.Query().Get("names") != "" {
-			metricsHandler.GetMultipleMetrics(w, r)
-		} else {
-			metricsHandler.ListMetrics(w, r)
-		}
-	})
-	r.Get("/metrics/{name}", metricsHandler.GetSingleMetric)
+Create `internal/api/router.go` with:
 
-	return r
-}
+1. **NewRouter function**: Takes handlers and logger, returns configured router
+2. **Middleware setup**: Add Chi middleware in order
+3. **Custom request logger**: Wraps Chi's response writer to capture status code and timing
+4. **Route definitions**: Map HTTP methods and paths to handlers
 
-func requestLogger(logger *slog.Logger) func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			start := time.Now()
+**What success looks like**: The router correctly routes requests to handlers and middleware executes in order.
 
-			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-			next.ServeHTTP(ww, r)
-
-			logger.Info("request",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"status", ww.Status(),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
-		})
-	}
-}
-```
-
-**Add missing import**:
-```go
-import (
-	"log/slog"
-	"net/http"
-	"time"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
-)
-```
-
-**Commit**:
-```bash
-git add internal/api/
-git commit -m "Add router configuration with logging middleware"
-```
+**Commit** after creating the router.
 
 ---
 
 ## Phase 7: Main Application
 
+The main application wires everything together: configuration loading, dependency initialization, HTTP server setup, and graceful shutdown.
+
 ### Task 7.1: Implement main.go
 
-**File to create**: `cmd/server/main.go`
+**The problem we're solving**: We need an entry point that:
+1. Loads configuration from disk and environment
+2. Initializes all layers (repository, service, handlers)
+3. Starts an HTTP server
+4. Handles graceful shutdown on SIGINT/SIGTERM
 
-**Code**:
-```go
-// Main entry point for the metrics API server.
-package main
+**Architecture decisions**:
 
-import (
-	"context"
-	"fmt"
-	"log/slog"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+1. **Dependency injection**: Pass dependencies explicitly (repository to service, service to handlers). No global variables or singletons.
 
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/api/handlers"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/config"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/repository"
-	"github.com/roryirvine/vibe-personal-dashboard-backend/internal/service"
-)
+2. **Fail fast on startup**: If configuration is invalid or database connection fails, exit immediately with os.Exit(1). Don't start the server in a broken state.
 
-func main() {
-	// Set up structured logging
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+3. **Graceful shutdown**: Listen for OS signals and give in-flight requests 30 seconds to complete before forcing shutdown.
 
-	logger.Info("starting vibe dashboard backend")
+4. **Structured logging**: Use Go's `slog` package for JSON-formatted logs with structured fields.
 
-	// Load configuration
-	port := getEnv("PORT", "8080")
-	dbPath := getEnv("DB_PATH", "./data.db")
-	configPath := "./config/metrics.toml"
+**Implementation**:
 
-	logger.Info("configuration",
-		"port", port,
-		"db_path", dbPath,
-		"config_path", configPath,
-	)
+Create `cmd/server/main.go` with:
 
-	// Load metrics configuration
-	metrics, err := config.LoadConfig(configPath)
-	if err != nil {
-		logger.Error("failed to load config", "error", err)
-		os.Exit(1)
-	}
-	logger.Info("loaded metrics", "count", len(metrics))
+1. **Setup logging**: Create a JSON logger and set it as the default
+2. **Load config**: Get PORT and DB_PATH from environment (with defaults), load metrics.toml
+3. **Initialize layers**: Create repository → create service → create handlers → create router
+4. **Start server**: Run `server.ListenAndServe()` in a goroutine
+5. **Wait for signal**: Block on a signal channel
+6. **Shutdown**: Call `server.Shutdown()` with a 30-second timeout context
 
-	// Initialize repository
-	repo, err := repository.NewSQLiteRepository(dbPath)
-	if err != nil {
-		logger.Error("failed to initialize repository", "error", err)
-		os.Exit(1)
-	}
-	defer repo.Close()
-	logger.Info("database connection established")
+**Key Go patterns**:
+- Use `defer repo.Close()` to ensure the database connection is closed
+- Use `signal.Notify()` to listen for SIGINT/SIGTERM
+- Use `context.WithTimeout()` for the shutdown deadline
 
-	// Initialize service
-	metricService := service.NewMetricService(repo, metrics, logger)
+**What success looks like**: The server starts, responds to requests, and shuts down cleanly when receiving SIGINT (Ctrl+C).
 
-	// Initialize handlers
-	metricsHandler := handlers.NewMetricsHandler(metricService, logger)
-
-	// Set up router
-	router := api.NewRouter(metricsHandler, logger)
-
-	// Create HTTP server
-	server := &http.Server{
-		Addr:         ":" + port,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	// Start server in goroutine
-	go func() {
-		logger.Info("server starting", "port", port)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server error", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	// Wait for interrupt signal
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	logger.Info("server shutting down")
-
-	// Graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error("server forced to shutdown", "error", err)
-	}
-
-	logger.Info("server stopped")
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-```
-
-**Commit**:
-```bash
-git add cmd/server/main.go
-git commit -m "Implement main application with graceful shutdown"
-```
+**Commit** after verifying the server starts.
 
 ---
 
 ## Phase 8: Example Configuration and Data
 
+Provide example configuration and test data so the implementer can immediately run and test the application.
+
 ### Task 8.1: Create Example Metrics Config
 
-**File to create**: `config/metrics.toml`
+**What you're providing**: A complete `config/metrics.toml` file with realistic examples of:
+- Simple metrics without parameters
+- Multi-row metrics
+- Parameterized metrics with different types
+- Optional vs required parameters
 
-**Code**:
-```toml
-# Example metrics configuration
+Create `config/metrics.toml` with 4-5 example metrics that demonstrate different features.
 
-[[metrics]]
-name = "total_users"
-query = "SELECT COUNT(*) FROM users"
-multi_row = false
-
-[[metrics]]
-name = "active_users"
-query = "SELECT COUNT(*) FROM users WHERE last_active > datetime('now', '-7 days')"
-multi_row = false
-
-[[metrics]]
-name = "users_by_status"
-query = "SELECT status, COUNT(*) as count FROM users GROUP BY status ORDER BY status"
-multi_row = true
-
-[[metrics]]
-name = "users_since_date"
-query = "SELECT id, name, email, created FROM users WHERE created >= ? ORDER BY created DESC"
-multi_row = true
-
-[[metrics.params]]
-name = "start_date"
-type = "string"
-required = true
-
-[[metrics]]
-name = "user_balance_sum"
-query = "SELECT SUM(balance) FROM users WHERE balance > ?"
-multi_row = false
-
-[[metrics.params]]
-name = "min_balance"
-type = "float"
-required = false
-```
-
-**Commit**:
-```bash
-git add config/metrics.toml
-git commit -m "Add example metrics configuration"
-```
+**Commit** after creating the file.
 
 ---
 
 ### Task 8.2: Create Test Database Setup Script
 
-**File to create**: `scripts/setup_test_db.sql`
+**What you're providing**: A shell script and SQL file that create a SQLite database with sample data matching the example metrics.
 
-**Code**:
-```sql
--- Test database schema and data
+Create:
+1. `scripts/setup_test_db.sql` - SQL schema and INSERT statements
+2. `scripts/setup_test_db.sh` - Bash script that runs sqlite3 with the SQL file
 
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL DEFAULT 'active',
-    balance REAL,
-    created TEXT NOT NULL DEFAULT (datetime('now')),
-    last_active TEXT NOT NULL DEFAULT (datetime('now'))
-);
+Make the script executable with `chmod +x`.
 
--- Insert test data
-INSERT INTO users (name, email, status, balance, created, last_active) VALUES
-    ('Alice Smith', 'alice@example.com', 'active', 1500.50, '2025-01-15 10:00:00', '2025-10-14 15:30:00'),
-    ('Bob Jones', 'bob@example.com', 'active', 2300.75, '2025-02-20 14:30:00', '2025-10-15 09:00:00'),
-    ('Charlie Brown', 'charlie@example.com', 'inactive', 0.00, '2024-12-01 09:15:00', '2025-01-05 12:00:00'),
-    ('Diana Prince', 'diana@example.com', 'active', 5000.00, '2025-03-10 11:45:00', '2025-10-15 08:00:00'),
-    ('Eve Wilson', 'eve@example.com', 'suspended', NULL, '2025-01-25 16:20:00', '2025-09-30 10:15:00');
-```
+**What success looks like**: Running `./scripts/setup_test_db.sh` creates `data.db` with sample data.
 
-**File to create**: `scripts/setup_test_db.sh`
-
-**Code**:
-```bash
-#!/bin/bash
-# Create test database
-
-DB_PATH="${1:-./data.db}"
-
-echo "Creating test database at $DB_PATH"
-
-# Remove existing database
-rm -f "$DB_PATH"
-
-# Create database and load schema
-sqlite3 "$DB_PATH" < scripts/setup_test_db.sql
-
-echo "Test database created successfully"
-echo "Run the server with: DB_PATH=$DB_PATH go run cmd/server/main.go"
-```
-
-**Make script executable**:
-```bash
-chmod +x scripts/setup_test_db.sh
-```
-
-**Commit**:
-```bash
-git add scripts/
-git commit -m "Add test database setup script"
-```
+**Commit** after creating the scripts.
 
 ---
 
 ## Phase 9: Documentation and Testing
 
-### Task 9.1: Create README for Running the Project
+### Task 9.1: Create README
 
-**File to create**: `README.md` (update existing)
+**What you're providing**: A README.md with:
+- Quick start instructions (setup DB, run server, test endpoints)
+- Configuration options (environment variables)
+- Development commands (tests, build)
 
-**Code**:
-```markdown
-# Vibe Personal Dashboard Backend
+Update `README.md` with clear, actionable instructions.
 
-A RESTful API service for querying metrics from a database using configuration-driven metric definitions.
-
-## Quick Start
-
-### 1. Set up test database
-
-```bash
-./scripts/setup_test_db.sh
-```
-
-### 2. Run the server
-
-```bash
-go run cmd/server/main.go
-```
-
-The server will start on port 8080 by default.
-
-### 3. Try the API
-
-```bash
-# List all available metrics
-curl http://localhost:8080/metrics
-
-# Get a single metric
-curl http://localhost:8080/metrics/total_users
-
-# Get multiple metrics
-curl "http://localhost:8080/metrics?names=total_users,active_users"
-
-# Get a parameterized metric
-curl "http://localhost:8080/metrics/users_since_date?start_date=2025-01-01"
-```
-
-## Configuration
-
-### Environment Variables
-
-- `PORT` - HTTP server port (default: 8080)
-- `DB_PATH` - SQLite database path (default: ./data.db)
-
-### Metrics Configuration
-
-Edit `config/metrics.toml` to define your metrics.
-
-## Development
-
-### Run tests
-
-```bash
-go test ./...
-```
-
-### Run tests with coverage
-
-```bash
-go test -cover ./...
-```
-
-### Build
-
-```bash
-go build -o bin/server ./cmd/server
-```
-
-## Architecture
-
-See [DESIGN.md](DESIGN.md) for detailed architecture documentation.
-
-See [IMPLEMENTATION.md](IMPLEMENTATION.md) for step-by-step implementation guide.
-```
-
-**Commit**:
-```bash
-git add README.md
-git commit -m "Update README with usage instructions"
-```
+**Commit** after updating README.
 
 ---
 
 ### Task 9.2: End-to-End Manual Test
 
-**Commands to run**:
+**What you're doing**: Manually verify the entire system works by:
+1. Setting up the test database
+2. Starting the server
+3. Making HTTP requests with curl
+4. Verifying responses match expectations
 
-```bash
-# 1. Set up test database
-./scripts/setup_test_db.sh
+Run the commands in the README and verify each endpoint returns the correct data.
 
-# 2. Start server (in one terminal)
-go run cmd/server/main.go
+**What success looks like**: All curl commands return the expected JSON responses.
 
-# 3. In another terminal, test endpoints
-curl http://localhost:8080/metrics
-curl http://localhost:8080/metrics/total_users
-curl "http://localhost:8080/metrics?names=total_users,active_users"
-curl "http://localhost:8080/metrics/users_since_date?start_date=2025-01-01"
-curl http://localhost:8080/metrics/users_by_status
-```
-
-**Expected results**:
-- First request returns list of metric names
-- Second returns single value (count)
-- Third returns two metrics
-- Fourth returns array of users
-- Fifth returns grouped counts
-
-**If all work, commit**:
-```bash
-git commit --allow-empty -m "Manual end-to-end testing complete"
-```
+**Commit** (empty commit is fine) after successful manual testing.
 
 ---
 
@@ -2310,14 +1153,14 @@ git commit --allow-empty -m "Manual end-to-end testing complete"
 You've now built a complete metrics API service following TDD, YAGNI, and KISS principles!
 
 **Key achievements**:
-- ✅ Test-driven development throughout
-- ✅ Clean architecture with separated concerns
-- ✅ Type-safe parameter handling
-- ✅ Concurrent query execution
-- ✅ Comprehensive error handling
-- ✅ Structured logging
-- ✅ Graceful shutdown
-- ✅ Well-tested codebase
+- Test-driven development throughout
+- Clean architecture with separated concerns
+- Type-safe parameter handling
+- Concurrent query execution
+- Comprehensive error handling
+- Structured logging
+- Graceful shutdown
+- Well-tested codebase
 
 **Next steps (if needed)**:
 - Add integration tests
