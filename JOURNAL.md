@@ -878,3 +878,158 @@ Completed a systematic refactoring of Phases 4-9 of IMPLEMENTATION.md, transform
 - Future phases (if any) should follow this principle-based approach
 
 ---
+
+## 2025-10-17: Phase 4 Implementation - Repository Layer
+
+### Prompt
+
+Rory asked me to implement Phase 4 (Repository Layer). Before starting, I reviewed DESIGN.md, IMPLEMENTATION.md, and JOURNAL.md to assess the project state and clarified several architectural questions. Rory confirmed the use case: 10-20 metrics queried once per minute by a frontend, SQLite as source of truth, simple internal service with no complex error handling requirements.
+
+### What I Did
+
+Successfully implemented all of Phase 4 following TDD principles with principle-based IMPLEMENTATION.md guidance:
+
+#### Task 4.1: Define Repository Interface
+- Created `internal/repository/repository.go` with clean interface definition
+- Initially had overly verbose comments explaining each method (violating CLAUDE.md guidelines)
+- Simplified to minimal comment: "Repository abstracts database operations from business logic"
+- Interface defines three methods: `QuerySingleValue`, `QueryMultiRow`, `Close`
+- Commit: f272add "Define Repository interface for database abstraction"
+
+#### Task 4.2: Install SQLite Driver
+- Ran `go get modernc.org/sqlite` (version 1.39.1)
+- Driver installed with all dependencies (libc, sys, exp, etc.)
+- Go version bumped to 1.24.6
+- Commit: d95c710 "Add SQLite driver dependency (modernc.org/sqlite)"
+
+#### Task 4.3: Implement SQLite Repository (TDD)
+- **Step 1: Wrote comprehensive tests first**
+  - Created `sqlite_test.go` with 15 test cases covering:
+    - Repository creation (in-memory and bad path)
+    - `QuerySingleValue()`: integers, strings, floats, no rows, timeouts
+    - `QueryMultiRow()`: all rows, filtering, no rows, NULL handling, column types, column names
+    - `Close()`: verify errors after close
+  - All tests initially failed (as expected in TDD)
+
+- **Step 2: Implemented SQLite repository**
+  - Created `sqlite.go` with:
+    - `SQLiteRepository` struct holding `*sql.DB`
+    - `NewSQLiteRepository()` constructor:
+      - Opens database with `sql.Open("sqlite", path)`
+      - Configures connection pool: 25 max open, 5 max idle
+      - Pings to verify connection
+      - Returns error if connection fails
+    - `QuerySingleValue()`: Uses `QueryRowContext()`, scans into `interface{}`, handles `sql.ErrNoRows`
+    - `QueryMultiRow()`: Uses `QueryContext()`, dynamic column handling with pointers slice, builds maps
+    - `Close()`: Closes database connection
+  - Package comment: "Implements the repository interface using SQLite."
+  - Error wrapping adds operation context
+
+- **Step 3: Verified all tests pass**
+  - All 15 tests in repository package passed ✅
+  - All 33 tests across entire project passed (14 models + 5 config + 15 repository - 1 cached)
+  - No test failures or warnings
+
+**Test Coverage**:
+- ✅ Constructor with in-memory database
+- ✅ Constructor with invalid path (nonexistent directory)
+- ✅ Single-value queries with different types (int64, string, float64)
+- ✅ Single-value query with parameters
+- ✅ Single-value query error (no rows)
+- ✅ Single-value query with context timeout
+- ✅ Multi-row queries returning all rows
+- ✅ Multi-row queries with filtering
+- ✅ Multi-row queries returning empty results (not error)
+- ✅ NULL value handling (becomes nil in maps)
+- ✅ Column type preservation (int64, float64, string)
+- ✅ Correct column names in result maps
+- ✅ Close functionality and error after close
+
+### Current Project State
+
+**Branch**: `feature/phase-4-repository` (created from main after Phase 3 merge)
+
+**Completed Files**:
+- ✅ `internal/repository/repository.go` (interface definition, minimal comments)
+- ✅ `internal/repository/sqlite.go` (SQLite implementation)
+- ✅ `internal/repository/sqlite_test.go` (comprehensive test suite)
+- ✅ go.mod and go.sum updated with modernc.org/sqlite
+
+**Test Results**:
+- Repository package: 15 tests passed
+- Models package: 14 tests passed (cached)
+- Config package: 5 tests passed (cached)
+- Total: 34 tests passing
+- Failed: 0
+
+**Commits**:
+1. f272add - Define Repository interface for database abstraction
+2. d95c710 - Add SQLite driver dependency (modernc.org/sqlite)
+3. 9d6387a - Implement SQLite repository with comprehensive tests
+
+### Technical Insights
+
+**TDD Benefits Confirmed Again**:
+- Writing tests first ensured clarity about what the repository should do
+- Failing tests confirmed implementation was needed
+- All scenarios covered before writing code
+- No debugging needed - tests guided implementation
+
+**SQLite Implementation Patterns**:
+- In-memory database (`:memory:`) provides fast, isolated testing
+- Connection pooling configured appropriately for metrics service scale
+- Dynamic column handling using pointer slices for `Scan()`
+- NULL values correctly represented as nil in Go
+- Error wrapping preserves context through error chain
+
+**Go Best Practices Applied**:
+- Interface-based abstraction decouples service from database implementation
+- Context propagation enables timeouts and cancellation
+- Generic return types (interface{}, []map[string]interface{}) handle any query
+- Blank import for driver registration: `_ "modernc.org/sqlite"`
+- defer rows.Close() ensures resource cleanup
+
+**Comment Discipline**:
+- Repository interface initially had over-verbose comments explaining each method
+- Simplified based on CLAUDE.md feedback (pre-commit hook detected issue)
+- Final version: minimal package comment, self-documenting through types
+
+### Architecture Decision Context
+
+Before starting Phase 4, I clarified with Rory:
+1. JSON marshaling of `interface{}` - works fine, no special handling needed
+2. Concurrent execution error handling - acceptable to lose all results if one metric fails
+3. Configuration reloading - service restart acceptable for internal service
+4. Parameter validation - caller's responsibility (this layer just converts types)
+5. SQLite quirks - no need to worry about edge cases at this stage
+
+This context confirms our KISS approach is appropriate for the actual use case.
+
+### Next Steps
+
+Phase 5 will implement the Service Layer:
+- Task 5.1: Install errgroup dependency
+- Task 5.2: Implement parameter conversion helper (TDD)
+- Task 5.3: Implement MetricService (TDD)
+  - Metric lookup (map-based)
+  - Parameter validation and conversion
+  - Single and multi-metric query execution
+  - Concurrent execution with fail-fast
+
+### Key Principles Followed
+
+✅ **TDD**: 15 tests written before implementation, all passing
+✅ **YAGNI**: Only implemented required functionality
+✅ **KISS**: Simple, straightforward implementation without over-engineering
+✅ **Commit Frequently**: Three commits for three distinct tasks
+✅ **Clean Comments**: Minimal comments following CLAUDE.md guidelines
+✅ **No Test Mocks**: Used real in-memory SQLite, not mocked database
+✅ **Error Wrapping**: Added context at appropriate layer
+
+### Reference
+
+- IMPLEMENTATION.md:637-809 (Phase 4: Repository Layer - principle-based guidance)
+- DESIGN.md:65-85 (Repository interface design rationale)
+- All tests passing: `go test ./...` → 34 tests
+
+---
