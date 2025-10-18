@@ -252,6 +252,34 @@ func TestMetricService_GetMetric_InvalidParamType(t *testing.T) {
 	}
 }
 
+func TestMetricService_GetMetric_OptionalIntParamNotProvided(t *testing.T) {
+	metrics := []models.Metric{
+		{
+			Name:     "users_paginated",
+			Query:    "SELECT * FROM users LIMIT ?",
+			MultiRow: true,
+			Params: []models.ParamDefinition{
+				{Name: "limit", Type: models.ParamTypeInt, Required: false},
+			},
+		},
+	}
+
+	repo := &mockRepository{}
+	service := NewMetricService(repo, metrics, nil)
+
+	// Call without providing the optional limit parameter
+	results, err := service.GetMetric(context.Background(), "users_paginated", nil)
+
+	// Should error because optional parameters don't work with positional SQL parameters
+	if err == nil {
+		t.Error("GetMetric() error = nil, want error for optional param not provided")
+	}
+
+	if len(results) != 0 {
+		t.Errorf("GetMetric() returned %d results on error, want 0", len(results))
+	}
+}
+
 func TestMetricService_GetMetric_MetricNotFound(t *testing.T) {
 	metrics := []models.Metric{
 		{Name: "active_users", Query: "SELECT 1", MultiRow: false},

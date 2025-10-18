@@ -124,14 +124,14 @@ func (ms *MetricService) prepareParams(metric models.Metric, params map[string]s
 	for i, paramDef := range metric.Params {
 		value, exists := params[paramDef.Name]
 
-		// Check if required parameter is present
-		if paramDef.Required && !exists {
-			return nil, fmt.Errorf("metric %q: required parameter %q is missing", metric.Name, paramDef.Name)
-		}
-
-		// If optional and missing, use empty string (caller will decide if this is valid)
+		// Check if parameter is present
 		if !exists {
-			value = ""
+			if paramDef.Required {
+				return nil, fmt.Errorf("metric %q: required parameter %q is missing", metric.Name, paramDef.Name)
+			}
+			// Optional parameters must be provided for SQL positional parameters to work.
+			// SQL positional parameters cannot be conditionally omitted.
+			return nil, fmt.Errorf("metric %q: optional parameter %q was not provided (optional parameters are not supported with positional SQL parameters)", metric.Name, paramDef.Name)
 		}
 
 		// Convert string value to typed value
