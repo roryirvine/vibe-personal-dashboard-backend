@@ -1204,3 +1204,89 @@ Phase 6 will implement the HTTP API Layer:
 - All tests passing: `go test ./...` → 52 tests
 
 ---
+
+## 2025-10-18: Bug Fix - Optional Parameters in MetricService
+
+### Prompt
+
+Rory noticed a potential bug in `metric_service.go` lines 133-135 where optional int/float parameters that weren't provided would be set to empty strings and then fail type conversion. He asked me to add a test to expose it, then discuss the fix.
+
+### What Happened
+
+**Test Exposed the Bug**:
+- Added `TestMetricService_GetMetric_OptionalIntParamNotProvided` test
+- Test calls a metric with an optional int parameter without providing it
+- Expected behavior: Should handle gracefully
+- Actual behavior: Crashed trying to convert empty string to int64
+
+**Root Cause Analysis**:
+The `prepareParams` function was treating missing optional parameters by setting them to empty strings (`value = ""`), then calling `convertParamValue("")` for int/float types. This fails because `strconv.ParseInt("")` and `strconv.ParseFloat("")` both return parse errors.
+
+The deeper architectural issue: **SQL positional parameters (`?`) cannot be conditionally omitted**. The query is fixed in the config - it expects exactly N arguments. If a query has a `LIMIT ?`, you must always provide a value for that placeholder. There's no way to conditionally skip it with positional parameters.
+
+**Solutions Considered**:
+1. Use nil for missing optional params → Fails at database (SQL `NULL` invalid for LIMIT)
+2. Use default values (0 for int, "" for string) → Different metrics need different defaults
+3. Disallow optional parameters → YAGNI approach, but limits flexibility
+4. **Fail with clear error explaining the constraint** → Chosen approach
+
+**Rory's Decision**:
+Fail with a clear error message explaining that optional parameters are not supported with positional SQL parameters. Metric authors should create separate metrics for different query patterns. This is pragmatic because:
+- It's honest about the architectural constraint
+- It's easy to understand and document
+- Separate metrics is cleaner than having conditional parameters
+- Future support for named parameters (`@param` syntax) could enable this if needed
+
+### Fix Implemented
+
+**Changed `prepareParams` in metric_service.go**:
+```go
+// Before: tried to convert empty strings
+if !exists {
+    value = ""  // ❌ Then tries to parse "" as int/float
+}
+
+// After: fail early with clear explanation
+if !exists {
+    if paramDef.Required {
+        return nil, fmt.Errorf("...")
+    }
+    return nil, fmt.Errorf("metric %q: optional parameter %q was not provided (optional parameters are not supported with positional SQL parameters)", ...)
+}
+```
+
+**Updated Test**:
+- `TestMetricService_GetMetric_OptionalIntParamNotProvided` now expects an error
+- Documents why the error occurs
+- Verifies no results are returned on error
+
+### Commits
+
+- a58a376: "Fix optional parameters: fail with clear error message"
+
+### Verification
+
+- All 29 service tests pass (11 metric service + 18 param conversion)
+- All 52 tests across entire project pass
+- No regressions
+
+### Documentation Needed
+
+When we create example configurations in Phase 8, we should document this constraint:
+- Use `required: true` for all parameters
+- Create separate metrics for different query patterns
+- Example: Instead of one "users" metric with optional limit, create "users_all", "users_limited_10", "users_limited_100"
+
+### Technical Insight
+
+**Architectural constraint discovered**: With positional SQL parameters, all parameters defined in the metric config MUST be provided by the caller. There's no way to make them optional without dynamic query building (which introduces SQL injection risks).
+
+This is a good example of why it's important to test edge cases - the initial implementation looked right but failed when exercised with optional parameters that weren't provided.
+
+### Reference
+
+- Commit: a58a376
+- Files: internal/service/metric_service.go, metric_service_test.go
+- Test added: TestMetricService_GetMetric_OptionalIntParamNotProvided
+
+---
