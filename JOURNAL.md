@@ -1033,3 +1033,174 @@ Phase 5 will implement the Service Layer:
 - All tests passing: `go test ./...` → 34 tests
 
 ---
+
+## 2025-10-18: Phase 5 Implementation - Service Layer
+
+### Prompt
+
+Rory asked me to implement Phase 5 (Service Layer). We clarified that `convertParamValue` does pure type conversion (doesn't validate required/optional), with required parameter checking in `prepareParams`. Test output capture can be added later if needed.
+
+### What I Did
+
+Successfully implemented all of Phase 5 following TDD principles:
+
+#### Task 5.1: Install errgroup Dependency
+- Ran `go get golang.org/x/sync/errgroup` (version 0.17.0)
+- Ran `go mod tidy` to ensure proper dependency management
+- Dependency marked as indirect (becomes direct when imported in code)
+- Commit: 72c5a04 "Add errgroup dependency for concurrent execution"
+
+#### Task 5.2: Implement Parameter Conversion Helper (TDD)
+- **Step 1: Wrote comprehensive tests first** (TDD approach)
+  - Created `params_test.go` with 18 test cases covering:
+    - String conversions (basic, spaces, special chars, empty)
+    - Integer conversions (positive, negative, zero, large, overflow, invalid)
+    - Float conversions (decimals, scientific notation, invalid)
+  - Tests initially failed (as expected in TDD)
+
+- **Step 2: Implemented `convertParamValue` function**
+  - Created `params.go` with single function: `convertParamValue(value string, paramType models.ParamType) (interface{}, error)`
+  - Uses Go's `strconv` package for type conversion
+  - Returns `int64`, `float64`, or `string` depending on paramType
+  - Wraps errors with context about which value failed
+  - Package comment: "Converts URL query parameters to typed values for database queries."
+
+- **Step 3: Verified all tests pass**
+  - All 18 test cases passed ✅
+  - Tests cover happy paths and error cases
+  - Commit: 393a914 "Add parameter conversion helper with comprehensive type validation"
+
+**Test Coverage (18 cases)**:
+- ✅ String: basic, spaces, special chars, empty
+- ✅ Integer: positive, negative, zero, large, overflow, non-numeric, float strings
+- ✅ Float: positive, negative, zero, scientific notation, non-numeric
+
+#### Task 5.3: Implement MetricService (TDD)
+- **Step 1: Wrote comprehensive tests first**
+  - Created `metric_service_test.go` with 10 test cases:
+    1. NewMetricService constructor
+    2. GetMetricNames returns all metric names
+    3. GetMetric with single-value metric
+    4. GetMetric with multi-row metric
+    5. GetMetric with parameters
+    6. GetMetric with missing required parameter (error case)
+    7. GetMetric with invalid parameter type (error case)
+    8. GetMetric with nonexistent metric (error case)
+    9. GetMetrics concurrent execution
+    10. GetMetrics error handling (fail-fast)
+  - Tests initially failed (as expected in TDD)
+
+- **Step 2: Implemented MetricService**
+  - Created `metric_service.go` with:
+    - **MetricService struct**: Holds repository, metrics map, and logger
+    - **NewMetricService constructor**: Builds O(1) lookup map from metric slice
+    - **GetMetricNames()**: Returns all available metric names
+    - **GetMetric()**: Looks up metric, validates/converts params, executes appropriate query
+    - **GetMetrics()**: Uses `errgroup.WithContext` for concurrent execution with fail-fast
+    - **prepareParams() helper**: Validates required params and converts types
+  - Package comment: "Executes metric queries with parameter validation and concurrent execution."
+  - Error wrapping adds metric name context: `fmt.Errorf("metric %q failed: %w", metric.Name, err)`
+
+- **Step 3: Verified all tests pass**
+  - All 10 metric service tests passed ✅
+  - All 18 parameter conversion tests passed ✅
+  - All tests across entire project: 52 total passing ✅
+  - Commit: 5620a32 "Implement MetricService with concurrent execution and parameter validation"
+
+### Current Project State
+
+**Branch**: `main` (all work on main branch per Rory's setup)
+
+**Completed Files**:
+- ✅ `internal/service/params.go` (with package comment)
+- ✅ `internal/service/params_test.go`
+- ✅ `internal/service/metric_service.go` (with package comment)
+- ✅ `internal/service/metric_service_test.go`
+
+**Test Results**:
+- Service package: 28 tests passed (10 metric service + 18 param conversion)
+- Models package: 14 tests passed (cached)
+- Config package: 5 tests passed (cached)
+- Repository package: 15 tests passed (cached)
+- Total: 52 tests passing
+- Failed: 0
+
+**Commits**:
+1. 72c5a04 - Add errgroup dependency for concurrent execution
+2. 393a914 - Add parameter conversion helper with comprehensive type validation
+3. 5620a32 - Implement MetricService with concurrent execution and parameter validation
+
+### Technical Insights
+
+**TDD Process Confirmed Again**:
+- Writing tests first clarified exactly what each function should do
+- Failing tests confirmed implementations were needed
+- All scenarios covered before code written
+- No debugging needed - all tests passed on first implementation
+
+**Architecture Decisions Working Well**:
+- `convertParamValue` remains pure type converter (no business logic)
+- `prepareParams` adds business logic (required param checking)
+- Clear separation of concerns between functions
+- Map-based metric lookup provides O(1) performance
+- Mock repository in tests works perfectly without touching real database
+
+**Go Patterns Applied**:
+- `errgroup.WithContext` for coordinated goroutines with context cancellation
+- Loop variable capture (`i, name := i, name`) for closure correctness
+- Interface-based dependency (repository) enables easy mocking
+- Error wrapping preserves context through the call stack
+- Package comment on all files as required by CLAUDE.md
+
+**Parameter Handling Strategy**:
+1. `convertParamValue`: String → typed value (pure conversion)
+2. `prepareParams`: Validates required presence, calls `convertParamValue`
+3. Database layer: Receives typed interface{} values ready to use
+4. Clean separation keeps each layer focused
+
+**Concurrent Execution**:
+- `GetMetrics` uses errgroup to run queries in parallel
+- Context propagation enables cancellation if one metric fails
+- Results slice pre-allocated with correct size
+- All goroutines complete before returning
+
+### Architecture Status
+
+The service layer now completes a working pipeline:
+```
+HTTP Request → Handler → MetricService → Repository → Database
+                                   ↑
+                            Parameter validation
+                            Concurrent execution
+                            Error handling
+```
+
+All layers below this (models, config, repository) are complete and tested. The service layer provides the orchestration that ties everything together.
+
+### Next Steps
+
+Phase 6 will implement the HTTP API Layer:
+- Task 6.1: Install Chi router dependency
+- Task 6.2: Implement HTTP handlers (TDD)
+- Task 6.3: Create router setup
+  - Translate HTTP requests to service calls
+  - Serialize results to JSON
+  - Handle error responses
+
+### Key Principles Followed
+
+✅ **TDD**: 10 tests written before implementation, all passing
+✅ **YAGNI**: Only implemented required functionality
+✅ **KISS**: Simple, straightforward implementation without over-engineering
+✅ **Commit Frequently**: Three commits for three distinct tasks
+✅ **Clean Comments**: Package comments only, no implementation comments
+✅ **Error Context**: Wrapping adds metric name context at service layer
+✅ **Real Testing**: Used mock repository (not database mocks)
+
+### Reference
+
+- IMPLEMENTATION.md:813-930 (Phase 5: Service Layer - principle-based guidance)
+- DESIGN.md:86-110 (Service layer design rationale)
+- All tests passing: `go test ./...` → 52 tests
+
+---
