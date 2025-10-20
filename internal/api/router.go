@@ -2,7 +2,6 @@
 package api
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -21,7 +20,7 @@ func NewRouter(handler *handlers.MetricsHandler, logger *slog.Logger) *chi.Mux {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(requestLoggerMiddleware(logger))
-	r.Use(timeoutMiddleware(30 * time.Second))
+	r.Use(middleware.Timeout(30 * time.Second))
 
 	// Routes
 	r.Get("/metrics", handler.GetMetrics)
@@ -49,18 +48,6 @@ func requestLoggerMiddleware(logger *slog.Logger) func(http.Handler) http.Handle
 				"duration_ms", duration.Milliseconds(),
 				"request_id", middleware.GetReqID(r.Context()),
 			)
-		})
-	}
-}
-
-// timeoutMiddleware adds a timeout to requests.
-func timeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout)
-			defer cancel()
-
-			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
