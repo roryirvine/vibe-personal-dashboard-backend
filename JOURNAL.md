@@ -1290,3 +1290,194 @@ This is a good example of why it's important to test edge cases - the initial im
 - Test added: TestMetricService_GetMetric_OptionalIntParamNotProvided
 
 ---
+
+## 2025-10-20: Phase 6 Implementation - HTTP API Layer
+
+### Prompt
+
+Rory asked me to implement Phase 6 (HTTP API Layer). Before starting, we clarified key decisions:
+1. Query parameters apply to all requested metrics
+2. Fail entire request if any metric fails (no partial success)
+3. Handle whitespace gracefully in comma-separated metric names
+4. Error codes: 400 for validation, 404 for nonexistent metrics, 500 for DB errors
+5. Always return array format for consistency
+
+### What I Did
+
+Successfully implemented all of Phase 6 following TDD principles:
+
+#### Task 6.1: Install Chi Router
+- Ran `go get github.com/go-chi/chi/v5` (version 5.2.3)
+- Verified dependency added to go.mod
+- Commit: 07dd2c5 "Add Chi router dependency"
+
+#### Task 6.2: Implement HTTP Handlers (TDD)
+- **Step 1: Wrote comprehensive tests first** (TDD approach)
+  - Created `internal/api/handlers/metrics_test.go` with 11 test cases covering:
+    - ListMetrics (all metrics, empty list)
+    - GetSingleMetric (happy path, not found, with query params)
+    - GetMultipleMetrics (basic, missing names, with whitespace, error handling)
+    - Error response formatting
+  - All tests initially failed (as expected in TDD)
+
+- **Step 2: Implemented HTTP handlers**
+  - Created `internal/api/handlers/metrics.go` with:
+    - `MetricService` interface (defining what handlers depend on)
+    - `MetricsHandler` struct with service and logger
+    - `ListMetrics()`: Returns all metrics as array
+    - `GetMetric()`: Handles single metric with URL parameter
+    - `GetMetrics()`: Handles multiple metrics via comma-separated names
+    - `extractQueryParams()`: Gets non-"names" query parameters
+    - `respondJSON()`: Consistent JSON response formatting
+    - `respondError()`: Error responses with "error" field
+    - `handleServiceError()`: Maps service errors to HTTP status codes
+
+- **Step 3: Verified all tests pass**
+  - All 11 handler tests passed ✅
+  - Whitespace handling test required URL encoding fix
+  - Total project tests: 61 passing ✅
+
+- **Key Implementation Details**:
+  - Always return array format: `[{"name": "...", "value": ...}, ...]`
+  - Single metric endpoint returns 1-element array
+  - Parameters from query string are passed to all requested metrics
+  - Whitespace handling: `strings.TrimSpace()` on split names
+  - Error status detection: checks error message for keywords
+
+**Test Coverage (11 test cases)**:
+- ✅ ListMetrics with 3 metrics
+- ✅ ListMetrics with empty list
+- ✅ GetSingleMetric (success)
+- ✅ GetSingleMetric (not found)
+- ✅ GetSingleMetric with query params
+- ✅ GetMultipleMetrics (success)
+- ✅ GetMultipleMetrics (missing names parameter)
+- ✅ GetMultipleMetrics (with whitespace in names)
+- ✅ GetMultipleMetrics (error handling)
+- ✅ Error response format
+- ✅ Mock service interface
+
+**Commit**: 01f3a38 "Implement HTTP handlers with TDD (ListMetrics, GetMetric, GetMetrics)"
+
+#### Task 6.3: Create Router Setup
+- Created `internal/api/router.go` with:
+  - `NewRouter()` function that configures chi.Mux
+  - Middleware stack (in order):
+    1. RequestID: Generates unique request ID for tracing
+    2. RealIP: Extracts real client IP (for proxied requests)
+    3. Recoverer: Converts panics to 500 errors
+    4. requestLoggerMiddleware: Logs method, path, status, duration
+    5. timeoutMiddleware: 30-second request timeout
+  - Route definitions:
+    - `GET /metrics`: GetMetrics handler
+    - `GET /metrics/{name}`: GetMetric handler
+  - Custom middleware:
+    - `requestLoggerMiddleware`: Uses wrapped ResponseWriter to capture status code
+    - `timeoutMiddleware`: Adds context timeout to requests
+    - `responseWriter`: Wraps http.ResponseWriter to capture status
+
+- Key middleware decisions:
+  - RequestID for tracing: automatic in chi
+  - RealIP for logging behind proxies: useful for production
+  - Recoverer for panics: prevents server from crashing
+  - Request logging: structured with slog (time, duration, status)
+  - 30-second timeout: prevents hung requests from tying up goroutines
+
+**Commit**: 2f97041 "Create router setup with middleware"
+
+### Current Project State
+
+**Branch**: `feature/phase-6-http-api` (ready for merge)
+
+**Completed Files**:
+- ✅ `internal/api/handlers/metrics.go` (with package comment)
+- ✅ `internal/api/handlers/metrics_test.go`
+- ✅ `internal/api/router.go` (with package comment)
+
+**Test Results**:
+- Handlers package: 11 tests passed ✅
+- Config package: 5 tests passed (cached)
+- Models package: 14 tests passed (cached)
+- Repository package: 15 tests passed (cached)
+- Service package: 28 tests passed (cached)
+- Total: 61 tests passing
+- Failed: 0
+
+**Commits**:
+1. 07dd2c5 - Add Chi router dependency
+2. 01f3a38 - Implement HTTP handlers with TDD (ListMetrics, GetMetric, GetMetrics)
+3. 2f97041 - Create router setup with middleware
+
+### Technical Insights
+
+**TDD Benefits Confirmed Again**:
+- Writing tests first clarified exact HTTP behavior needed
+- Test failures exposed whitespace encoding issue early
+- All scenarios covered before implementation
+- No debugging needed - tests guided implementation
+
+**HTTP Design Decisions**:
+- Array format simplifies client parsing (always iterate over results)
+- Consistent error format helps clients handle errors uniformly
+- Parameter extraction per handler (ListMetrics vs GetMetrics) keeps logic clear
+- Interface segregation for MetricService (handlers don't depend on full service)
+
+**Go HTTP Best Practices**:
+- ResponseWriter wrapping to capture status code (common pattern)
+- Context propagation for cancellation (used in handlers via r.Context())
+- Chi middleware composition (clean, functional style)
+- Error message inspection for status code (pragmatic approach)
+
+**Middleware Philosophy**:
+- RequestID first (needed by all downstream logging)
+- Recovery before logging (panics should be logged)
+- Logging after recovery (captures panic recovery)
+- Timeout last (wrapper around request processing)
+
+### Architecture Status
+
+HTTP layer complete! Full request → response pipeline:
+```
+HTTP Request
+    ↓
+Router + Middleware (chi)
+    ↓
+Handlers (HTTP layer)
+    ↓
+Service (business logic)
+    ↓
+Repository (data access)
+    ↓
+Database
+    ↓
+Response (JSON) ← Handler serializes
+```
+
+The last layer is Phase 7 (main.go) which wires everything together.
+
+### Next Steps
+
+Phase 7 will implement main.go (application entry point):
+- Configuration loading from environment
+- Dependency injection (repository → service → handlers)
+- HTTP server setup with graceful shutdown
+- Signal handling for SIGINT/SIGTERM
+
+### Key Principles Followed
+
+✅ **TDD**: 11 tests written before implementation, all passing
+✅ **YAGNI**: Only implemented required functionality
+✅ **KISS**: Simple, straightforward implementations
+✅ **Commit Frequently**: Three commits for three distinct tasks
+✅ **Clean Comments**: Package comments only, no implementation comments
+✅ **Interface Segregation**: Handlers depend on service interface, not concrete type
+✅ **Consistent Format**: Array format for all responses, error messages
+
+### Reference
+
+- IMPLEMENTATION.md:933-1039 (Phase 6: HTTP API Layer - principle-based guidance)
+- DESIGN.md:111-160 (HTTP API design rationale)
+- All tests passing: `go test ./...` → 61 tests
+- Branch: feature/phase-6-http-api (ready for merge to main)
+
+---
