@@ -36,16 +36,7 @@ func NewMetricsHandler(service MetricService, logger *slog.Logger) *MetricsHandl
 // ListMetrics handles GET /metrics (with no ?names parameter).
 func (h *MetricsHandler) ListMetrics(w http.ResponseWriter, r *http.Request) {
 	names := h.service.GetMetricNames()
-
-	results := make([]models.MetricResult, len(names))
-	for i, name := range names {
-		results[i] = models.MetricResult{
-			Name:  name,
-			Value: name,
-		}
-	}
-
-	h.respondJSON(w, http.StatusOK, results)
+	h.respondJSON(w, http.StatusOK, names)
 }
 
 // GetMetric handles GET /metrics/{name}.

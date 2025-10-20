@@ -37,28 +37,18 @@ func (m *mockMetricService) GetMetrics(ctx context.Context, names []string, para
 func TestListMetrics(t *testing.T) {
 	tests := []struct {
 		name           string
-		queryParams    string
 		mockMetrics    []string
 		expectedStatus int
-		expectedBody   []map[string]interface{}
 	}{
 		{
 			name:           "list all metrics",
-			queryParams:    "",
 			mockMetrics:    []string{"active_users", "revenue_total", "user_signups"},
 			expectedStatus: http.StatusOK,
-			expectedBody: []map[string]interface{}{
-				{"name": "active_users", "value": []string{"active_users"}},
-				{"name": "revenue_total", "value": []string{"revenue_total"}},
-				{"name": "user_signups", "value": []string{"user_signups"}},
-			},
 		},
 		{
 			name:           "empty metrics list",
-			queryParams:    "",
 			mockMetrics:    []string{},
 			expectedStatus: http.StatusOK,
-			expectedBody:   []map[string]interface{}{},
 		},
 	}
 
@@ -75,7 +65,7 @@ func TestListMetrics(t *testing.T) {
 				logger:  slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 			}
 
-			req := httptest.NewRequest("GET", "/metrics"+tt.queryParams, nil)
+			req := httptest.NewRequest("GET", "/metrics", nil)
 			w := httptest.NewRecorder()
 
 			handler.ListMetrics(w, req)
@@ -84,13 +74,20 @@ func TestListMetrics(t *testing.T) {
 				t.Errorf("expected status %d, got %d", tt.expectedStatus, w.Code)
 			}
 
-			var result []models.MetricResult
+			var result []string
 			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 				t.Fatalf("failed to unmarshal response: %v", err)
 			}
 
 			if len(result) != len(tt.mockMetrics) {
 				t.Errorf("expected %d metrics, got %d", len(tt.mockMetrics), len(result))
+			}
+
+			// Verify order and content
+			for i, name := range result {
+				if name != tt.mockMetrics[i] {
+					t.Errorf("metric %d: expected %q, got %q", i, tt.mockMetrics[i], name)
+				}
 			}
 		})
 	}
