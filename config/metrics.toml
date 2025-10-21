@@ -1,0 +1,11 @@
+# Example metrics configuration for testing
+
+[[metrics]]
+name = "server_time"
+query = "SELECT datetime('now')"
+multi_row = false
+
+[[metrics]]
+name = "system_info"
+query = "SELECT 'running'"
+multi_row = false
