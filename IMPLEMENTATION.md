@@ -1068,9 +1068,14 @@ Create `cmd/server/main.go` with:
 1. **Setup logging**: Create a JSON logger and set it as the default
 2. **Load config**: Get PORT and DB_PATH from environment (with defaults), load metrics.toml
 3. **Initialize layers**: Create repository → create service → create handlers → create router
-4. **Start server**: Run `server.ListenAndServe()` in a goroutine
-5. **Wait for signal**: Block on a signal channel
-6. **Shutdown**: Call `server.Shutdown()` with a 30-second timeout context
+4. **Configure HTTP server**: Set up timeouts properly:
+   - `ReadTimeout: 10s` - Clients should send requests quickly
+   - `WriteTimeout: 30s` - Allow time to write response after middleware timeout
+   - `middleware.Timeout: 25s` - Request processing timeout (fires before WriteTimeout)
+   - Important: Middleware timeout must be shorter than WriteTimeout to allow clean cancellation
+5. **Start server**: Run `server.ListenAndServe()` in a goroutine
+6. **Wait for signal**: Block on a signal channel
+7. **Shutdown**: Call `server.Shutdown()` with a 30-second timeout context
 
 **Key Go patterns**:
 - Use `defer repo.Close()` to ensure the database connection is closed
@@ -1093,7 +1098,8 @@ Provide example configuration and test data so the implementer can immediately r
 - Simple metrics without parameters
 - Multi-row metrics
 - Parameterized metrics with different types
-- Optional vs required parameters
+
+**Important**: All parameters should be marked as `required = true`. Optional parameters are not supported with SQL positional parameters (`?`) - if a parameter might not be provided, create separate metrics instead.
 
 Create `config/metrics.toml` with 4-5 example metrics that demonstrate different features.
 
@@ -1125,6 +1131,24 @@ Make the script executable with `chmod +x`.
 - Quick start instructions (setup DB, run server, test endpoints)
 - Configuration options (environment variables)
 - Development commands (tests, build)
+
+**Configuration Documentation Requirements**:
+
+1. **Environment Variables**: Document how to set environment variables before running the server:
+   - `PORT` - Server port (default: 8080)
+   - `DB_PATH` - Path to SQLite database (default: ./data.db)
+   - Example: `PORT=3000 DB_PATH=/var/data/metrics.db go run ./cmd/server`
+
+2. **Log Level Configuration**: Document how to change the log level in `cmd/server/main.go`:
+   - Default: `slog.LevelInfo` (shows INFO, WARN, ERROR)
+   - For debugging: Change to `slog.LevelDebug` (shows DEBUG, INFO, WARN, ERROR)
+   - Location: Line ~88 in `cmd/server/main.go` in the `setupLogging()` function
+
+3. **Metrics Configuration**: Document the architectural constraint about parameters:
+   - All parameters must be marked `required = true` in `config/metrics.toml`
+   - Optional parameters are not supported with SQL positional parameters (`?`)
+   - If a parameter might not be provided, create separate metrics instead
+   - Example: Instead of one metric with optional `limit`, create `users_all` and `users_top_10` as separate metrics
 
 Update `README.md` with clear, actionable instructions.
 
