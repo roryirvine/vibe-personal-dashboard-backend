@@ -20,7 +20,7 @@ func NewRouter(handler *handlers.MetricsHandler, logger *slog.Logger) *chi.Mux {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(requestLoggerMiddleware(logger))
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(middleware.Timeout(25 * time.Second))
 
 	// Routes
 	r.Get("/metrics", handler.GetMetrics)
