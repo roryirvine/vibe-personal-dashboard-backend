@@ -1702,3 +1702,147 @@ Phase 7 completes the implementation of the full metrics API service:
 - Branch: feature/phase-7-main (ready for merge to main)
 
 ---
+
+## 2025-10-30: Phase 8 Implementation - Example Configuration and Data
+
+### Prompt
+
+Rory asked me to implement Phase 8 (Example Configuration and Data). We clarified:
+1. Expand the existing server_time and system_info metrics with 1-2 new ones
+2. Keep test data realistic but minimal
+3. Add a parameterized example showing `WHERE id = ?`
+4. Scripts should be idempotent (safe to run multiple times) and create fresh database
+5. Keep config comments simple (2 lines max)
+
+### What I Did
+
+Successfully implemented Phase 8 by expanding the configuration and creating database setup scripts:
+
+#### Task 8.1: Create Example Metrics Config
+- Expanded `config/metrics.toml` with four metrics demonstrating different features:
+  1. `server_time`: Single-value metric (scalar return)
+  2. `system_info`: Single-value metric (scalar return)
+  3. `all_users`: Multi-row metric showing all users (array return)
+  4. `user_details`: Multi-row metric with required parameter (WHERE id = ?)
+- Added clear, concise comments (2 lines max per CLAUDE.md guidelines)
+- All parameters marked as `required = true` (as per Phase 5 architectural constraint)
+- Commit: "Add example metrics configuration with parameterized example"
+
+**Metrics Created**:
+- `all_users`: Multi-row metric returning all users (id, name, email)
+- `user_details`: Parameterized metric showing pattern with required int parameter
+
+#### Task 8.2: Create Database Setup Scripts
+- Created `scripts/setup_test_db.sql`:
+  - Creates `users` table with id, name, email columns
+  - Inserts 5 sample users (Alice, Bob, Charlie, Diana, Eve)
+  - Realistic but minimal test data
+
+- Created `scripts/setup_test_db.sh`:
+  - Idempotent bash script (safe to run multiple times)
+  - Deletes existing database if present
+  - Creates fresh database by running SQL file
+  - Uses dynamic script location for reliability
+  - Respects DB_PATH environment variable (defaults to ./data.db)
+
+- Made script executable with `chmod +x`
+- Commit: "Add database setup script with idempotent schema"
+
+#### End-to-End Verification
+
+Tested the new metrics end-to-end with the running server:
+
+**Test 1: all_users metric**
+```bash
+curl http://localhost:8080/metrics/all_users
+```
+Response: Array of all 5 users with id, name, email ✅
+
+**Test 2: user_details metric with parameter**
+```bash
+curl "http://localhost:8080/metrics/user_details?user_id=2"
+```
+Response: Single user (Bob Smith, id=2) in array format ✅
+
+**Test 3: Parameter validation**
+```bash
+curl "http://localhost:8080/metrics/user_details?user_id=abc"
+```
+Response: 400 error with clear message about invalid integer parameter ✅
+
+### Current Project State
+
+**Completed Files**:
+- ✅ `config/metrics.toml` (expanded with 4 metrics)
+- ✅ `scripts/setup_test_db.sh` (idempotent setup script)
+- ✅ `scripts/setup_test_db.sql` (schema and sample data)
+- ✅ `data.db` (created and verified with sample data)
+
+**Script Properties**:
+- ✅ Idempotent: Can run multiple times safely, creates fresh database each time
+- ✅ Fresh database: Deletes existing data.db before recreating
+- ✅ Dynamic paths: Script location-independent using bash SCRIPT_DIR
+- ✅ Environment aware: Respects DB_PATH variable with ./data.db default
+- ✅ Data verification: Confirmed 5 users inserted correctly
+
+**Test Results**:
+- All existing 61 unit tests still passing
+- All 4 new metrics tested and working correctly
+- Parameter validation working as expected
+- Database idempotency verified (ran script twice, correct data both times)
+
+**Commits**:
+1. "Expand metrics config with all_users and user_details examples"
+2. "Add database setup scripts (SQL schema and bash runner)"
+
+### Technical Insights
+
+**Configuration Design**:
+- Comments follow CLAUDE.md 2-line-max guideline
+- Parameterized metric shows practical example of required parameter constraint
+- Four metrics demonstrate: scalar values, multi-row arrays, parameters
+- Documentation of parameter constraint in comments helps future metric authors
+
+**Script Design**:
+- Uses `set -e` to fail fast on errors
+- Gets script directory dynamically: `SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`
+- Removes existing database before creation for true fresh-start behavior
+- Output messages help users understand what's happening
+
+**Architectural Insights**:
+- Parameter constraint (all required) drives config design: users must create separate metrics for variations
+- Example: can't have one "user_details" with optional limit - create "user_details_all", "user_details_limited_10" instead
+- Simple test data sufficient for demonstration - no need for complex fixtures
+
+### What Success Looks Like
+
+✅ **Configuration**: Expanded metrics show different patterns (single-value, multi-row, parameterized)
+✅ **Scripts**: Setup script is idempotent and creates fresh database reliably
+✅ **Data**: Sample data is realistic but minimal (5 users, simple schema)
+✅ **Testing**: End-to-end verification confirms all metrics work with actual data
+✅ **Documentation**: Config comments explain the parameter requirement constraint
+
+### Key Principles Followed
+
+✅ **YAGNI**: Only added what was needed - 2 new metrics, simple user table
+✅ **KISS**: Simple script design, straightforward SQL schema
+✅ **Realistic but Minimal**: 5 sample users sufficient for testing all metric patterns
+✅ **Idempotent Scripts**: Safe to run setup script multiple times
+✅ **Clear Comments**: 2-line max comments per CLAUDE.md guidelines
+
+### Next Steps
+
+Phase 9 will create documentation and final testing:
+- Task 9.1: Create README with quick start, configuration, development commands
+- Task 9.2: End-to-end manual testing (run all curl commands to verify system)
+
+### Reference
+
+- IMPLEMENTATION.md:1091-1122 (Phase 8: Example Configuration and Data)
+- DESIGN.md:184-208 (Project structure, configuration files)
+- Scripts: `scripts/setup_test_db.sh` and `scripts/setup_test_db.sql`
+- Config: `config/metrics.toml`
+- All unit tests passing: `go test ./...` → 61 tests
+- End-to-end testing: Verified with server running and curl requests
+
+---
