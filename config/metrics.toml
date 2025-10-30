@@ -1,5 +1,6 @@
 # Example metrics configuration for testing
 
+# Simple metrics - return scalar values
 [[metrics]]
 name = "server_time"
 query = "SELECT datetime('now')"
@@ -9,3 +10,18 @@ multi_row = false
 name = "system_info"
 query = "SELECT 'running'"
 multi_row = false
+
+# Multi-row metrics - return arrays of objects
+[[metrics]]
+name = "all_users"
+query = "SELECT id, name, email FROM users"
+multi_row = true
+
+# Parameterized metric - demonstrates required parameter with type validation
+[[metrics]]
+name = "user_details"
+query = "SELECT id, name, email FROM users WHERE id = ?"
+multi_row = true
+params = [
+  { name = "user_id", type = "int", required = true }
+]
