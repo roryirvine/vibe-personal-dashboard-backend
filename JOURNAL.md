@@ -1846,3 +1846,165 @@ Phase 9 will create documentation and final testing:
 - End-to-end testing: Verified with server running and curl requests
 
 ---
+
+## 2025-10-31: Phase 9 Implementation - Documentation and Testing
+
+### Prompt
+
+Rory asked me to implement Phase 9 (Documentation and Testing). We clarified:
+1. README should cover both developers and operators
+2. Can reference DESIGN.md but not IMPLEMENTATION.md (too detailed)
+3. Cover build/run/endpoints + document examples from Task 8
+4. Include important lessons learned and limitations from journal
+5. Document env vars with examples, log levels, parameter constraint
+6. Include go build/test/run commands, endpoint examples with responses
+7. Include expected responses in README (no error cases)
+8. Yes, update journal with results
+
+### What I Did
+
+Successfully implemented Phase 9 by creating comprehensive documentation and performing end-to-end testing:
+
+#### Task 9.1: Create Comprehensive README
+- Created `README.md` (365 lines) covering:
+  - **Quick Start**: Prerequisites, build, run with environment variables
+  - **API Endpoints**: All endpoints with request/response examples
+  - **Example Metrics**: Documentation of all 4 metrics with curl commands
+  - **Configuration**: Env vars (PORT, DB_PATH) with examples
+  - **Metrics Configuration**: Explanation of config.toml format and parameter constraint
+  - **Log Level**: How to adjust slog level in main.go
+  - **Development**: go build, go test, go run commands + database setup
+  - **Architecture Overview**: Brief summary with reference to DESIGN.md
+  - **Important Limitations and Design Decisions**:
+    - Optional parameters not supported (SQL positional placeholders)
+    - No configuration hot-reload (requires restart)
+    - No caching (acceptable for low-volume use)
+    - Error handling with layered context wrapping
+    - Concurrent execution (fail-fast behavior)
+  - **Troubleshooting**: Common issues and solutions
+  - **Files and Structure**: Project directory layout
+  - **Next Steps**: Ideas for extending the project
+
+#### Task 9.2: End-to-End Manual Testing
+- Built server: `go build -o bin/server ./cmd/server` ✅
+- Set up database: `./scripts/setup_test_db.sh` ✅
+- Started server and ran 8 manual tests with curl:
+
+**Test Results** (All Passed ✅):
+1. List all metrics → ["server_time", "system_info", "all_users", "user_details"]
+2. Get server_time → Single value "2025-10-31 15:54:19"
+3. Get system_info → Single value "running"
+4. Get multiple metrics (server_time, system_info) → Both returned as array
+5. Get all_users → Array of 5 users with id, name, email
+6. Get user_details with user_id=2 → Bob Smith (id=2)
+7. Get user_details with user_id=5 → Eve Wilson (id=5)
+8. Get multiple with parameter (all_users + user_details?user_id=3) → Both returned, Charlie Brown for user_details
+
+### Current Project State
+
+**Branch**: `feature/phase-9-documentation` (created from main)
+
+**Completed Files**:
+- ✅ `README.md` (comprehensive, covers developers and operators)
+- ✅ End-to-end testing verified all endpoints
+
+**Test Results**:
+- All existing 61 unit tests still passing
+- All 8 manual end-to-end tests passed
+- Database setup script verified idempotent
+- All 4 metrics working correctly (scalar, multi-row, parameterized)
+
+### Documentation Sections
+
+**Key Learning Points Included**:
+
+1. **Important Limitations Section**:
+   - Optional parameters not supported (architectural constraint from Phase 5)
+   - Workaround: Create separate metrics for variations
+   - Example provided showing the pattern
+
+2. **Design Decisions Explained**:
+   - Why no hot-reload: simplicity and avoiding stale config bugs
+   - Why no caching: YAGNI principle, acceptable for dashboard use case
+   - Why fail-fast on concurrent metrics: all-or-nothing consistency
+
+3. **Error Handling Philosophy**:
+   - Layered error context wrapping (model → config → service → handler)
+   - Each layer adds exactly the context it knows about
+   - Full error messages include complete context chain
+
+4. **Troubleshooting Guide**:
+   - Common error messages and their solutions
+   - "metric not found" → Check config
+   - "invalid integer value" → Type mismatch
+   - "no rows in result set" → Single-value metric with zero results
+
+### Documentation Quality
+
+**Coverage**:
+- ✅ Quick start with prerequisites and step-by-step commands
+- ✅ All 4 example metrics documented with curl examples
+- ✅ Configuration (env vars, log levels, parameter constraint)
+- ✅ Development commands (build, test, run)
+- ✅ Architecture overview with DESIGN.md reference
+- ✅ Limitations documented with rationale
+- ✅ Troubleshooting with practical examples
+- ✅ File structure and next steps
+
+**Audience Split**:
+- Developers: Build/test/run, architecture, extending the project
+- Operators: Configuration, troubleshooting, deployment
+- Both: Quick start, endpoints, examples
+
+### What Success Looks Like
+
+✅ **Documentation**: Comprehensive README covers both audience types
+✅ **Examples**: All 4 metrics documented with actual curl commands and responses
+✅ **Configuration**: Environment variables, log levels, parameter constraint clearly explained
+✅ **Development**: Build, test, run commands all included
+✅ **Architecture**: Brief overview with reference to deep-dive DESIGN.md
+✅ **Limitations**: Clearly documented with rationale and workarounds
+✅ **Manual Testing**: All 8 end-to-end tests passed
+✅ **Troubleshooting**: Common issues and solutions included
+✅ **Lessons Learned**: Journal insights integrated into documentation
+
+### Key Principles Followed
+
+✅ **Clear Documentation**: README is comprehensive but readable (365 lines)
+✅ **Example-Driven**: Every feature shown with working examples
+✅ **User-Focused**: Covers both developer and operator needs
+✅ **Honest About Limitations**: Constraints explained with rationale
+✅ **Reference-Based**: Links to DESIGN.md for deep architecture
+✅ **Practical Troubleshooting**: Common issues documented with solutions
+✅ **End-to-End Verification**: All major features tested manually
+
+### System Complete
+
+Phase 9 completes the full metrics API service with comprehensive documentation:
+
+**Project Status**:
+- ✅ Phase 1: Foundation (directory structure, .gitignore)
+- ✅ Phase 2: Models (ParamType, ParamDefinition, Metric, MetricResult)
+- ✅ Phase 3: Config (TOML loading and validation)
+- ✅ Phase 4: Repository (SQLite implementation)
+- ✅ Phase 5: Service (parameter conversion, MetricService, concurrent execution)
+- ✅ Phase 6: HTTP API (handlers, router, middleware)
+- ✅ Phase 7: Main Application (entry point, logging, graceful shutdown)
+- ✅ Phase 8: Example Configuration and Data (4 metrics, sample database)
+- ✅ Phase 9: Documentation and Testing (README, manual testing)
+
+**Metrics**:
+- 61 unit tests passing
+- 8 end-to-end manual tests passed
+- 100% feature coverage documented
+- Zero test failures
+
+### Reference
+
+- README.md: 365 lines of comprehensive documentation
+- DESIGN.md: Architectural reference for deeper understanding
+- JOURNAL.md: Complete implementation history
+- All unit tests passing: `go test ./...` → 61 tests
+- End-to-end testing: 8 manual curl tests, all passing
+
+---
